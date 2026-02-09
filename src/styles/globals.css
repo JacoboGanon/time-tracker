@@ -1,6 +1,274 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Design System: "Precision"
+ * --------------------------
+ * Inspired by Swiss design and precision instruments.
+ * DM Sans — geometric, warm, humanist sans-serif for UI text.
+ * JetBrains Mono — crisp monospace for time displays and data.
+ * Teal accent on warm stone neutrals — energetic but focused.
+ */
 
 @theme {
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif,
-    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  /* Typography */
+  --font-sans: var(--font-sans), "DM Sans", ui-sans-serif, system-ui,
+    sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol",
+    "Noto Color Emoji";
+  --font-mono: var(--font-mono), "JetBrains Mono", ui-monospace,
+    "Cascadia Code", "Source Code Pro", monospace;
+
+  /* Stone neutrals — warm undertone */
+  --color-stone-950: oklch(0.15 0.005 60);
+  --color-stone-900: oklch(0.22 0.005 60);
+  --color-stone-800: oklch(0.30 0.005 60);
+  --color-stone-700: oklch(0.40 0.008 60);
+  --color-stone-600: oklch(0.50 0.008 60);
+  --color-stone-500: oklch(0.58 0.008 60);
+  --color-stone-400: oklch(0.68 0.006 60);
+  --color-stone-300: oklch(0.78 0.005 60);
+  --color-stone-200: oklch(0.88 0.004 70);
+  --color-stone-100: oklch(0.94 0.003 80);
+  --color-stone-50: oklch(0.98 0.002 90);
+
+  /* Teal accent — the signature color */
+  --color-teal-600: oklch(0.55 0.14 185);
+  --color-teal-500: oklch(0.62 0.15 185);
+  --color-teal-400: oklch(0.72 0.12 185);
+  --color-teal-300: oklch(0.80 0.09 185);
+
+  /* Amber — warm complement for warnings & highlights */
+  --color-amber-500: oklch(0.77 0.16 75);
+  --color-amber-400: oklch(0.82 0.14 80);
+  --color-amber-600: oklch(0.70 0.16 65);
+  --color-amber-300: oklch(0.87 0.10 85);
+
+  /* Red — clear destructive signals */
+  --color-red-500: oklch(0.58 0.22 25);
+  --color-red-400: oklch(0.68 0.18 25);
+  --color-red-900: oklch(0.28 0.08 20);
+
+  /* Green — success states */
+  --color-green-500: oklch(0.62 0.17 150);
+  --color-green-400: oklch(0.72 0.14 150);
+  --color-green-900: oklch(0.28 0.06 155);
+}
+
+/* Auth animations */
+@keyframes auth-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes auth-line-draw {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes auth-pulse-subtle {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+@keyframes auth-tick {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes auth-spinner {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+/* ─── Light Mode ─────────────────────────────────────────── */
+:root {
+  --radius: 0.5rem;
+
+  /* Surfaces */
+  --background: oklch(0.98 0.002 90);
+  --foreground: oklch(0.15 0.005 60);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.15 0.005 60);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.15 0.005 60);
+
+  /* Primary — teal */
+  --primary: oklch(0.55 0.14 185);
+  --primary-foreground: oklch(0.99 0.002 185);
+
+  /* Secondary — warm stone */
+  --secondary: oklch(0.94 0.003 80);
+  --secondary-foreground: oklch(0.22 0.005 60);
+
+  /* Muted — subtle backgrounds */
+  --muted: oklch(0.94 0.003 80);
+  --muted-foreground: oklch(0.50 0.008 60);
+
+  /* Accent — lighter teal wash */
+  --accent: oklch(0.94 0.02 185);
+  --accent-foreground: oklch(0.22 0.005 60);
+
+  /* Destructive */
+  --destructive: oklch(0.58 0.22 25);
+
+  /* Borders & inputs */
+  --border: oklch(0.88 0.004 70);
+  --input: oklch(0.88 0.004 70);
+  --ring: oklch(0.55 0.14 185);
+
+  /* Chart palette — teal-anchored, warm complements */
+  --chart-1: oklch(0.55 0.14 185);
+  --chart-2: oklch(0.77 0.16 75);
+  --chart-3: oklch(0.62 0.17 150);
+  --chart-4: oklch(0.65 0.18 310);
+  --chart-5: oklch(0.58 0.22 25);
+
+  /* Sidebar */
+  --sidebar: oklch(0.96 0.003 80);
+  --sidebar-foreground: oklch(0.15 0.005 60);
+  --sidebar-primary: oklch(0.55 0.14 185);
+  --sidebar-primary-foreground: oklch(0.99 0.002 185);
+  --sidebar-accent: oklch(0.94 0.02 185);
+  --sidebar-accent-foreground: oklch(0.22 0.005 60);
+  --sidebar-border: oklch(0.88 0.004 70);
+  --sidebar-ring: oklch(0.55 0.14 185);
+}
+
+/* ─── Dark Mode ──────────────────────────────────────────── */
+.dark {
+  /* Surfaces — deep warm blacks */
+  --background: oklch(0.13 0.005 60);
+  --foreground: oklch(0.94 0.003 80);
+  --card: oklch(0.18 0.005 60);
+  --card-foreground: oklch(0.94 0.003 80);
+  --popover: oklch(0.18 0.005 60);
+  --popover-foreground: oklch(0.94 0.003 80);
+
+  /* Primary — brighter teal for dark bg */
+  --primary: oklch(0.72 0.12 185);
+  --primary-foreground: oklch(0.13 0.005 60);
+
+  /* Secondary */
+  --secondary: oklch(0.22 0.005 60);
+  --secondary-foreground: oklch(0.94 0.003 80);
+
+  /* Muted */
+  --muted: oklch(0.22 0.005 60);
+  --muted-foreground: oklch(0.58 0.008 60);
+
+  /* Accent — dark teal tint */
+  --accent: oklch(0.22 0.02 185);
+  --accent-foreground: oklch(0.94 0.003 80);
+
+  /* Destructive — lighter red for contrast */
+  --destructive: oklch(0.68 0.18 25);
+
+  /* Borders & inputs — subtle warm edges */
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 12%);
+  --ring: oklch(0.72 0.12 185);
+
+  /* Chart palette — elevated for dark backgrounds */
+  --chart-1: oklch(0.72 0.12 185);
+  --chart-2: oklch(0.82 0.14 80);
+  --chart-3: oklch(0.72 0.14 150);
+  --chart-4: oklch(0.72 0.16 310);
+  --chart-5: oklch(0.68 0.18 25);
+
+  /* Sidebar — slightly elevated surface */
+  --sidebar: oklch(0.16 0.005 60);
+  --sidebar-foreground: oklch(0.94 0.003 80);
+  --sidebar-primary: oklch(0.72 0.12 185);
+  --sidebar-primary-foreground: oklch(0.13 0.005 60);
+  --sidebar-accent: oklch(0.22 0.02 185);
+  --sidebar-accent-foreground: oklch(0.94 0.003 80);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.72 0.12 185);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "ss01", "ss02", "cv01";
+  }
+}
+
+/*
+ ---break---
+ */
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
 }
