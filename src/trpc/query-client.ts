@@ -4,6 +4,8 @@ import {
 } from "@tanstack/react-query";
 import SuperJSON from "superjson";
 
+import { shouldRetryQueryError } from "./query-behavior";
+
 export const createQueryClient = () =>
   new QueryClient({
     defaultOptions: {
@@ -11,6 +13,9 @@ export const createQueryClient = () =>
         // With SSR, we usually want to set some default staleTime
         // above 0 to avoid refetching immediately on the client
         staleTime: 30 * 1000,
+        retry: shouldRetryQueryError,
+        retryOnMount: false,
+        refetchOnWindowFocus: false,
       },
       dehydrate: {
         serializeData: SuperJSON.serialize,

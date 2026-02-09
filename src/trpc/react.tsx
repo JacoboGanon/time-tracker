@@ -8,6 +8,7 @@ import { useState } from "react";
 import SuperJSON from "superjson";
 
 import { type AppRouter } from "~/server/api/root";
+import { shouldLogTrpcOperation } from "./query-behavior";
 import { createQueryClient } from "./query-client";
 
 let clientQueryClientSingleton: QueryClient | undefined = undefined;
@@ -45,9 +46,18 @@ export function TRPCReactProvider(props: { children: React.ReactNode }) {
     api.createClient({
       links: [
         loggerLink({
-          enabled: (op) =>
-            process.env.NODE_ENV === "development" ||
-            (op.direction === "down" && op.result instanceof Error),
+          enabled: (op) => {
+            if (op.direction === "down") {
+              return shouldLogTrpcOperation({
+                direction: op.direction,
+                result: op.result,
+              });
+            }
+
+            return shouldLogTrpcOperation({
+              direction: op.direction,
+            });
+          },
         }),
         httpBatchStreamLink({
           transformer: SuperJSON,
