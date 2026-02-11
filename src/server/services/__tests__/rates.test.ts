@@ -6,15 +6,37 @@ describe("rates service", () => {
   it("prefers project override to default rate", () => {
     const rate = resolveHourlyRateCents({
       defaultRateCents: 10_000,
+      clientMemberRateCents: null,
       projectOverrideRateCents: 12_500,
     });
 
     expect(rate).toBe(12_500);
   });
 
-  it("falls back to default rate when no project override is set", () => {
+  it("prefers project override to client member rate", () => {
+    const rate = resolveHourlyRateCents({
+      defaultRateCents: 10_000,
+      clientMemberRateCents: 11_000,
+      projectOverrideRateCents: 12_500,
+    });
+
+    expect(rate).toBe(12_500);
+  });
+
+  it("prefers client member rate to default rate", () => {
     const rate = resolveHourlyRateCents({
       defaultRateCents: 8_000,
+      clientMemberRateCents: 11_000,
+      projectOverrideRateCents: null,
+    });
+
+    expect(rate).toBe(11_000);
+  });
+
+  it("falls back to default rate when no overrides are set", () => {
+    const rate = resolveHourlyRateCents({
+      defaultRateCents: 8_000,
+      clientMemberRateCents: null,
       projectOverrideRateCents: null,
     });
 
@@ -24,6 +46,7 @@ describe("rates service", () => {
   it("returns null when no rate exists", () => {
     const rate = resolveHourlyRateCents({
       defaultRateCents: null,
+      clientMemberRateCents: null,
       projectOverrideRateCents: null,
     });
 

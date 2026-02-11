@@ -37,7 +37,8 @@ export const rateRouter = createTRPCRouter({
   getProjectOverrides: protectedProcedure
     .input(z.object({ projectId: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
-      await getProjectMembershipOrThrow(ctx, input.projectId);
+      const membership = await getProjectMembershipOrThrow(ctx, input.projectId);
+      assertCanManageProject(membership.role);
 
       return ctx.db.projectRateOverride.findMany({
         where: { projectId: input.projectId },

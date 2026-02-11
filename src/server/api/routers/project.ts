@@ -72,6 +72,26 @@ export const projectRouter = createTRPCRouter({
           },
         });
 
+        // Auto-add all client members to the new project
+        const clientMembers = await tx.clientMember.findMany({
+          where: {
+            clientId: input.clientId,
+            userId: { not: ctx.session.user.id },
+          },
+          select: { userId: true },
+        });
+
+        if (clientMembers.length > 0) {
+          await tx.projectMember.createMany({
+            data: clientMembers.map((cm) => ({
+              projectId: project.id,
+              userId: cm.userId,
+              role: "member" as const,
+            })),
+            skipDuplicates: true,
+          });
+        }
+
         return project;
       });
     }),

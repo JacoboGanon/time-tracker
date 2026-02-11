@@ -61,18 +61,6 @@ const updateEntrySchema = z
 
 type Context = Awaited<ReturnType<typeof createTRPCContext>>;
 
-const loadUserAccessibleProjectIds = async (params: {
-  ctx: Context;
-  userId: string;
-}) => {
-  const memberships = await params.ctx.db.projectMember.findMany({
-    where: { userId: params.userId },
-    select: { projectId: true },
-  });
-
-  return memberships.map((membership) => membership.projectId);
-};
-
 const assertCanCreateEntry = (role: string) => {
   if (role === "viewer") {
     throw new TRPCError({
@@ -171,25 +159,66 @@ export const timeEntryRouter = createTRPCRouter({
   list: protectedProcedure
     .input(listFiltersSchema.optional())
     .query(async ({ ctx, input }) => {
-      const projectIds = await loadUserAccessibleProjectIds({
-        ctx,
-        userId: ctx.session.user.id,
+      const memberships = await ctx.db.projectMember.findMany({
+        where: { userId: ctx.session.user.id },
+        select: { projectId: true, role: true },
       });
 
-      if (projectIds.length === 0) {
+      if (memberships.length === 0) {
         return [];
       }
 
-      const projectFilterIds = input?.projectId ? [input.projectId] : projectIds;
+      const allProjectIds = memberships.map((m) => m.projectId);
+      const managerProjectIds = memberships
+        .filter((m) => m.role === "owner" || m.role === "manager")
+        .map((m) => m.projectId);
+      const restrictedProjectIds = memberships
+        .filter((m) => m.role === "member" || m.role === "viewer")
+        .map((m) => m.projectId);
+
+      // Apply project filter if specified
+      const requestedProjectIds = input?.projectId
+        ? allProjectIds.filter((id) => id === input.projectId)
+        : allProjectIds;
+
+      if (requestedProjectIds.length === 0) {
+        return [];
+      }
+
+      // Build per-role query conditions:
+      // - owner/manager projects: respect memberId filter or show all
+      // - member/viewer projects: only show own entries
+      const orConditions: Record<string, unknown>[] = [];
+
+      const managerFiltered = requestedProjectIds.filter((id) =>
+        managerProjectIds.includes(id),
+      );
+      const restrictedFiltered = requestedProjectIds.filter((id) =>
+        restrictedProjectIds.includes(id),
+      );
+
+      if (managerFiltered.length > 0) {
+        orConditions.push({
+          projectId: { in: managerFiltered },
+          ...(input?.memberId ? { userId: input.memberId } : {}),
+        });
+      }
+      if (restrictedFiltered.length > 0) {
+        orConditions.push({
+          projectId: { in: restrictedFiltered },
+          userId: ctx.session.user.id,
+        });
+      }
+
+      if (orConditions.length === 0) {
+        return [];
+      }
 
       return ctx.db.timeEntry.findMany({
         where: {
-          projectId: {
-            in: projectFilterIds.filter((projectId) => projectIds.includes(projectId)),
-          },
+          OR: orConditions,
           startAt: input?.startDate ? { gte: input.startDate } : undefined,
           endAt: input?.endDate ? { lte: input.endDate } : undefined,
-          userId: input?.memberId,
           activityTypeId: input?.activityTypeId,
           clientId: input?.clientId,
         },
@@ -465,13 +494,17 @@ export const timeEntryRouter = createTRPCRouter({
       }),
     )
     .query(async ({ ctx, input }) => {
-      await getProjectMembershipOrThrow(ctx, input.projectId);
+      const membership = await getProjectMembershipOrThrow(ctx, input.projectId);
+      const isManager =
+        membership.role === "owner" || membership.role === "manager";
 
       const entries = await ctx.db.timeEntry.findMany({
         where: {
           projectId: input.projectId,
           startAt: { gte: input.startDate },
           endAt: { lte: input.endDate },
+          // Members/viewers only see their own totals
+          ...(!isManager ? { userId: ctx.session.user.id } : {}),
         },
         include: {
           user: {

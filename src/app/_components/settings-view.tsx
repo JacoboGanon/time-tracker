@@ -7,9 +7,11 @@ import {
   FolderPlus,
   Plus,
   Tag,
+  Users,
 } from "lucide-react";
 
 import { api } from "~/trpc/react";
+import { authClient } from "~/server/better-auth/client";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Badge } from "~/components/ui/badge";
@@ -22,6 +24,8 @@ import {
   SelectValue,
 } from "~/components/ui/select";
 
+import { ClientMembersDialog } from "./client-members-dialog";
+
 const toCurrency = (amountCents: number): string =>
   new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -30,6 +34,9 @@ const toCurrency = (amountCents: number): string =>
 
 export function SettingsView() {
   const utils = api.useUtils();
+  const session = authClient.useSession();
+  const currentUserId = session.data?.user?.id;
+
   const clientsQuery = api.clients.list.useQuery();
   const projectsQuery = api.project.list.useQuery();
   const activitiesQuery = api.activityType.list.useQuery();
@@ -47,6 +54,9 @@ export function SettingsView() {
 
   // Rate
   const [rateDollars, setRateDollars] = useState("150");
+
+  // Client member management
+  const [managingClientId, setManagingClientId] = useState<string | null>(null);
 
   useEffect(() => {
     if (clientsQuery.data?.length && !selectedClientId) {
@@ -91,6 +101,10 @@ export function SettingsView() {
       await utils.rate.getMyDefaultRate.invalidate();
     },
   });
+
+  const managingClient = clientsQuery.data?.find(
+    (c) => c.id === managingClientId,
+  );
 
   return (
     <div className="space-y-6">
@@ -144,12 +158,27 @@ export function SettingsView() {
                   className="flex items-center justify-between rounded-md border border-border/50 bg-background/50 px-3 py-2"
                 >
                   <span className="text-sm">{client.name}</span>
-                  <Badge variant="outline" className="text-[10px]">
-                    {(projectsQuery.data ?? []).filter(
-                      (p) => p.client.id === client.id,
-                    ).length}{" "}
-                    projects
-                  </Badge>
+                  <div className="flex items-center gap-1.5">
+                    <Badge variant="outline" className="text-[10px]">
+                      {client._count.members}{" "}
+                      {client._count.members === 1 ? "member" : "members"}
+                    </Badge>
+                    <Badge variant="outline" className="text-[10px]">
+                      {client._count.projects}{" "}
+                      {client._count.projects === 1 ? "project" : "projects"}
+                    </Badge>
+                    {client.createdById === currentUserId && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 gap-1 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+                        onClick={() => setManagingClientId(client.id)}
+                      >
+                        <Users className="size-3" />
+                        Members
+                      </Button>
+                    )}
+                  </div>
                 </div>
               ))}
               {!clientsQuery.data?.length && (
@@ -362,6 +391,17 @@ export function SettingsView() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Client Members Dialog */}
+      {managingClient && currentUserId && (
+        <ClientMembersDialog
+          clientId={managingClient.id}
+          clientName={managingClient.name}
+          currentUserId={currentUserId}
+          open={!!managingClientId}
+          onOpenChange={(open) => !open && setManagingClientId(null)}
+        />
+      )}
     </div>
   );
 }

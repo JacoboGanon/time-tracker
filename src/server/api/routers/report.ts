@@ -26,25 +26,23 @@ const exportReportSchema = z.object({
 
 type Context = Awaited<ReturnType<typeof createTRPCContext>>;
 
-const getAccessibleProjectIds = async (ctx: Context, userId: string) => {
-  const memberships = await ctx.db.projectMember.findMany({
-    where: { userId },
-    select: { projectId: true },
-  });
-
-  return memberships.map((membership) => membership.projectId);
-};
-
 const buildSummaryFromFilters = async (params: {
   ctx: Context;
   userId: string;
   filters: z.infer<typeof reportFiltersSchema>;
 }) => {
-  const projectIds = await getAccessibleProjectIds(params.ctx, params.userId);
+  // Get memberships with roles for access control
+  const memberships = await params.ctx.db.projectMember.findMany({
+    where: { userId: params.userId },
+    select: { projectId: true, role: true },
+  });
+
+  const projectIds = memberships.map((m) => m.projectId);
   if (projectIds.length === 0) {
     return {
       summary: buildReportSummary({ entries: [] }),
       entryCount: 0,
+      hasFullAccess: false,
     };
   }
 
@@ -59,13 +57,27 @@ const buildSummaryFromFilters = async (params: {
     ? [params.filters.projectId]
     : projectIds;
 
+  // Check if user has manager/owner access on ALL queried projects.
+  // If they are member/viewer on ANY project in the query, restrict data.
+  const queriedMemberships = memberships.filter((m) =>
+    allowedProjectIds.includes(m.projectId),
+  );
+  const hasFullAccess = queriedMemberships.length > 0 && queriedMemberships.every(
+    (m) => m.role === "owner" || m.role === "manager",
+  );
+
+  // Restricted users can only see their own entries, never another member's
+  const effectiveMemberId = hasFullAccess
+    ? params.filters.memberId
+    : params.userId;
+
   const entries = await params.ctx.db.timeEntry.findMany({
     where: {
       projectId: { in: allowedProjectIds },
       startAt: { gte: params.filters.startDate },
       endAt: { lte: params.filters.endDate },
       clientId: params.filters.clientId,
-      userId: params.filters.memberId,
+      userId: effectiveMemberId,
       activityTypeId: params.filters.activityTypeId,
     },
     include: {
@@ -85,13 +97,36 @@ const buildSummaryFromFilters = async (params: {
     return {
       summary: buildReportSummary({ entries: [] }),
       entryCount: 0,
+      hasFullAccess,
     };
   }
 
+  // Restricted users: hide all rate/billable information
+  if (!hasFullAccess) {
+    const summary = buildReportSummary({
+      entries: entries.map((entry) => ({
+        id: entry.id,
+        projectId: entry.projectId,
+        projectName: entry.project.name,
+        userId: entry.userId,
+        userName: entry.user.name,
+        activityTypeId: entry.activityTypeId,
+        activityTypeName: entry.activityType.name,
+        durationMinutes: entry.durationMinutes,
+        isBillable: false,
+        hourlyRateCents: null,
+      })),
+    });
+
+    return { summary, entryCount: entries.length, hasFullAccess };
+  }
+
+  // Full access: resolve rates normally
   const userIds = Array.from(new Set(entries.map((entry) => entry.userId)));
   const usedProjectIds = Array.from(new Set(entries.map((entry) => entry.projectId)));
+  const usedClientIds = Array.from(new Set(entries.map((entry) => entry.clientId)));
 
-  const [rateCards, overrides] = await Promise.all([
+  const [rateCards, overrides, clientMemberRates] = await Promise.all([
     params.ctx.db.rateCard.findMany({
       where: { userId: { in: userIds } },
       select: { userId: true, hourlyRateCents: true },
@@ -107,6 +142,18 @@ const buildSummaryFromFilters = async (params: {
         hourlyRateCents: true,
       },
     }),
+    params.ctx.db.clientMember.findMany({
+      where: {
+        userId: { in: userIds },
+        clientId: { in: usedClientIds },
+        hourlyRateCents: { not: null },
+      },
+      select: {
+        userId: true,
+        clientId: true,
+        hourlyRateCents: true,
+      },
+    }),
   ]);
 
   const defaultRateByUserId = new Map(
@@ -116,6 +163,12 @@ const buildSummaryFromFilters = async (params: {
     overrides.map((override) => [
       `${override.projectId}:${override.userId}`,
       override.hourlyRateCents,
+    ]),
+  );
+  const clientMemberRateByClientUser = new Map(
+    clientMemberRates.map((cm) => [
+      `${cm.clientId}:${cm.userId}`,
+      cm.hourlyRateCents,
     ]),
   );
 
@@ -132,6 +185,9 @@ const buildSummaryFromFilters = async (params: {
       isBillable: entry.isBillable,
       hourlyRateCents: resolveHourlyRateCents({
         defaultRateCents: defaultRateByUserId.get(entry.userId) ?? null,
+        clientMemberRateCents:
+          clientMemberRateByClientUser.get(`${entry.clientId}:${entry.userId}`) ??
+          null,
         projectOverrideRateCents:
           overrideRateByProjectUser.get(`${entry.projectId}:${entry.userId}`) ??
           null,
@@ -139,10 +195,7 @@ const buildSummaryFromFilters = async (params: {
     })),
   });
 
-  return {
-    summary,
-    entryCount: entries.length,
-  };
+  return { summary, entryCount: entries.length, hasFullAccess };
 };
 
 const toPeriodLabel = (filters: z.infer<typeof reportFiltersSchema>) =>

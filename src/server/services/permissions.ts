@@ -11,6 +11,9 @@ export const canViewProject = (_role: ProjectRole): boolean => true;
 export const canManageProject = (role: ProjectRole): boolean =>
   role === "owner" || role === "manager";
 
+export const canViewAllEntries = (role: ProjectRole): boolean =>
+  role === "owner" || role === "manager";
+
 export const canManageMembership = (role: ProjectRole): boolean =>
   role === "owner";
 

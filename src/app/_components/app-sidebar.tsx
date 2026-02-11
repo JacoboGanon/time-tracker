@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import {
   Clock,
   FileText,
@@ -9,6 +10,7 @@ import {
   LogOut,
   Settings,
   Timer,
+  Users,
 } from "lucide-react";
 
 import { authClient } from "~/server/better-auth/client";
@@ -28,6 +30,7 @@ import {
   SidebarSeparator,
 } from "~/components/ui/sidebar";
 import { Avatar, AvatarFallback } from "~/components/ui/avatar";
+import { ClientMembersDialog } from "./client-members-dialog";
 
 const NAV_ITEMS = [
   { id: "timer", label: "Timer", icon: Timer },
@@ -47,6 +50,9 @@ interface AppSidebarProps {
 export function AppSidebar({ activeView, onNavigate, userName }: AppSidebarProps) {
   const projectsQuery = api.project.list.useQuery();
   const clientsQuery = api.clients.list.useQuery();
+  const session = authClient.useSession();
+  const currentUserId = session.data?.user?.id;
+  const [managingClientId, setManagingClientId] = useState<string | null>(null);
 
   const initials = userName
     .split(" ")
@@ -117,9 +123,19 @@ export function AppSidebar({ activeView, onNavigate, userName }: AppSidebarProps
               {projectsByClient.map((client) =>
                 client.projects.length > 0 ? (
                   <div key={client.id}>
-                    <p className="mb-1 mt-2 px-2 text-[10px] font-medium tracking-widest text-muted-foreground/60 uppercase first:mt-0">
-                      {client.name}
-                    </p>
+                    <div className="mb-1 mt-2 flex items-center gap-1 px-2 first:mt-0">
+                      <p className="flex-1 truncate text-[10px] font-medium tracking-widest text-muted-foreground/60 uppercase">
+                        {client.name}
+                      </p>
+                      {client.createdById === currentUserId && (
+                        <button
+                          onClick={() => setManagingClientId(client.id)}
+                          className="flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:bg-accent hover:text-muted-foreground group-has-[[data-collapsible=icon]]/sidebar-wrapper:hidden"
+                        >
+                          <Users className="size-3" />
+                        </button>
+                      )}
+                    </div>
                     {client.projects.map((project) => (
                       <SidebarMenuItem key={project.id}>
                         <SidebarMenuButton
@@ -178,6 +194,20 @@ export function AppSidebar({ activeView, onNavigate, userName }: AppSidebarProps
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>
+
+      {/* Client Members Dialog */}
+      {managingClientId && currentUserId && (
+        <ClientMembersDialog
+          clientId={managingClientId}
+          clientName={
+            clientsQuery.data?.find((c) => c.id === managingClientId)?.name ??
+            ""
+          }
+          currentUserId={currentUserId}
+          open={!!managingClientId}
+          onOpenChange={(open) => !open && setManagingClientId(null)}
+        />
+      )}
     </Sidebar>
   );
 }

@@ -44,23 +44,43 @@ model User {
   createdActivityTypes  ActivityType[]        @relation("ActivityTypeCreatedBy")
   generatedReports      Report[]              @relation("ReportGeneratedBy")
   changedTimeEntryAudit TimeEntryAudit[]      @relation("TimeEntryAuditChangedBy")
+  createdClients        Client[]              @relation("ClientCreatedBy")
+  clientMemberships     ClientMember[]
 
   @@unique([email])
   @@map("user")
 }
 
 model Client {
-  id          String      @id @default(cuid())
+  id          String         @id @default(cuid())
   name        String
   description String?
-  isActive    Boolean     @default(true)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  isActive    Boolean        @default(true)
+  createdById String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  createdBy   User?          @relation("ClientCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   projects    Project[]
+  members     ClientMember[]
   timeEntries TimeEntry[]
   reports     Report[]
 
   @@index([name])
+}
+
+model ClientMember {
+  id              String   @id @default(cuid())
+  clientId        String
+  userId          String
+  hourlyRateCents Int?
+  currency        String   @default("USD")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  client          Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, userId])
+  @@index([userId])
 }
 
 model Project {

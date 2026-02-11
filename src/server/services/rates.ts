@@ -1,5 +1,6 @@
 type ResolveRateInput = {
   defaultRateCents: number | null;
+  clientMemberRateCents: number | null;
   projectOverrideRateCents: number | null;
 };
 
@@ -11,10 +12,15 @@ type CalculateAmountInput = {
 
 export const resolveHourlyRateCents = ({
   defaultRateCents,
+  clientMemberRateCents,
   projectOverrideRateCents,
 }: ResolveRateInput): number | null => {
   if (projectOverrideRateCents !== null) {
     return projectOverrideRateCents;
+  }
+
+  if (clientMemberRateCents !== null) {
+    return clientMemberRateCents;
   }
 
   return defaultRateCents;
