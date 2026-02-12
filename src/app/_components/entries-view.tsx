@@ -4,13 +4,17 @@ import { useEffect, useMemo, useState } from "react";
 import {
   CalendarDays,
   Check,
+  Loader2,
   Pencil,
   Trash2,
   X,
 } from "lucide-react";
 
 import { api } from "~/trpc/react";
-import { useFilteredProjects } from "./client-filter-context";
+import {
+  useClientFilter,
+  useFilteredProjects,
+} from "./client-filter-context";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
@@ -22,6 +26,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "~/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "~/components/ui/alert-dialog";
+import { EntriesViewSkeleton } from "./view-skeletons";
 
 const toDateAtStartOfDay = (value: string): Date | undefined => {
   if (!value) return undefined;
@@ -56,6 +71,7 @@ const ALL_VALUE = "__all__";
 export function EntriesView() {
   const utils = api.useUtils();
   const { data: projects } = useFilteredProjects();
+  const { selectedProjectId, setSelectedProjectId } = useClientFilter();
   const activitiesQuery = api.activityType.list.useQuery();
 
   const [filterStart, setFilterStart] = useState(
@@ -66,6 +82,14 @@ export function EntriesView() {
   );
   const [filterProject, setFilterProject] = useState(ALL_VALUE);
   const [filterActivity, setFilterActivity] = useState(ALL_VALUE);
+
+  // One-shot: navigate from sidebar project click
+  useEffect(() => {
+    if (selectedProjectId) {
+      setFilterProject(selectedProjectId);
+      setSelectedProjectId(null);
+    }
+  }, [selectedProjectId, setSelectedProjectId]);
 
   // Reset project filter when selected project leaves the filtered list
   useEffect(() => {
@@ -78,6 +102,10 @@ export function EntriesView() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [deleteDialog, setDeleteDialog] = useState<{
+    id: string;
+    description: string;
+  } | null>(null);
 
   const listFilters = useMemo(
     () => ({
@@ -89,11 +117,21 @@ export function EntriesView() {
     [filterStart, filterEnd, filterProject, filterActivity],
   );
 
-  const entriesQuery = api.timeEntry.list.useQuery(listFilters);
+  const entriesQuery = api.timeEntry.infiniteList.useInfiniteQuery(
+    { ...listFilters, limit: 50 },
+    {
+      getNextPageParam: (lastPage) => lastPage.nextCursor,
+    },
+  );
+
+  const allEntries = useMemo(
+    () => entriesQuery.data?.pages.flatMap((p) => p.items) ?? [],
+    [entriesQuery.data],
+  );
 
   const updateEntry = api.timeEntry.update.useMutation({
     onSuccess: async () => {
-      await utils.timeEntry.list.invalidate();
+      await utils.timeEntry.invalidate();
       setEditingId(null);
       setEditDraft(null);
     },
@@ -102,24 +140,25 @@ export function EntriesView() {
 
   const deleteEntry = api.timeEntry.delete.useMutation({
     onSuccess: async () => {
-      await utils.timeEntry.list.invalidate();
+      await utils.timeEntry.invalidate();
+      setDeleteDialog(null);
     },
     onError: (error) => setErrorMsg(error.message),
   });
 
-  const totalMinutes = (entriesQuery.data ?? []).reduce(
+  const totalMinutes = allEntries.reduce(
     (sum, e) => sum + e.durationMinutes,
     0,
   );
-  const billableMinutes = (entriesQuery.data ?? []).reduce(
+  const billableMinutes = allEntries.reduce(
     (sum, e) => sum + (e.isBillable ? e.durationMinutes : 0),
     0,
   );
 
   // Group entries by date
   const groupedEntries = useMemo(() => {
-    const groups = new Map<string, typeof entriesQuery.data>();
-    for (const entry of entriesQuery.data ?? []) {
+    const groups = new Map<string, typeof allEntries>();
+    for (const entry of allEntries) {
       const dateKey = new Date(entry.startAt).toLocaleDateString("en-US", {
         weekday: "short",
         month: "short",
@@ -129,8 +168,11 @@ export function EntriesView() {
       groups.get(dateKey)!.push(entry);
     }
     return Array.from(groups.entries());
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entriesQuery.data]);
+  }, [allEntries]);
+
+  if (entriesQuery.isLoading) {
+    return <EntriesViewSkeleton />;
+  }
 
   return (
     <div className="space-y-6">
@@ -241,12 +283,12 @@ export function EntriesView() {
               <div className="h-px flex-1 bg-border" />
               <span className="text-xs font-mono text-muted-foreground/60">
                 {formatHours(
-                  entries!.reduce((s, e) => s + e.durationMinutes, 0),
+                  entries.reduce((s, e) => s + e.durationMinutes, 0),
                 )}
               </span>
             </div>
             <div className="space-y-1">
-              {entries!.map((entry) => (
+              {entries.map((entry) => (
                 <div
                   key={entry.id}
                   className="group rounded-lg border border-transparent bg-sidebar px-4 py-3 transition-colors hover:border-sidebar-border"
@@ -418,9 +460,11 @@ export function EntriesView() {
                             variant="ghost"
                             className="size-7 text-destructive hover:text-destructive"
                             onClick={() =>
-                              deleteEntry.mutate({ entryId: entry.id })
+                              setDeleteDialog({
+                                id: entry.id,
+                                description: entry.description,
+                              })
                             }
-                            disabled={deleteEntry.isPending}
                           >
                             <Trash2 className="size-3" />
                           </Button>
@@ -433,12 +477,69 @@ export function EntriesView() {
             </div>
           </div>
         ))}
-        {!entriesQuery.data?.length && (
+        {allEntries.length === 0 && !entriesQuery.isLoading && (
           <p className="py-12 text-center text-sm text-muted-foreground/50">
             No entries for the selected filters.
           </p>
         )}
       </div>
+
+      {/* Load more */}
+      {entriesQuery.hasNextPage && (
+        <div className="flex justify-center pt-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => entriesQuery.fetchNextPage()}
+            disabled={entriesQuery.isFetchingNextPage}
+          >
+            {entriesQuery.isFetchingNextPage && (
+              <Loader2 className="mr-2 size-3.5 animate-spin" />
+            )}
+            Load more
+          </Button>
+        </div>
+      )}
+
+      {/* Delete confirmation dialog */}
+      <AlertDialog
+        open={!!deleteDialog}
+        onOpenChange={(open) => !open && setDeleteDialog(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Time Entry?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete the time entry
+              {deleteDialog?.description && (
+                <>
+                  {" "}
+                  &ldquo;
+                  <span className="font-medium text-foreground">
+                    {deleteDialog.description}
+                  </span>
+                  &rdquo;
+                </>
+              )}
+              . This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleteEntry.isPending}
+              onClick={() => {
+                if (deleteDialog) {
+                  deleteEntry.mutate({ entryId: deleteDialog.id });
+                }
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

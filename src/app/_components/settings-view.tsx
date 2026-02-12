@@ -3,12 +3,15 @@
 import { useEffect, useState } from "react";
 import {
   Building2,
+  Check,
   DollarSign,
   FolderPlus,
+  Pencil,
   Plus,
   Tag,
   Trash2,
   Users,
+  X,
 } from "lucide-react";
 
 import { api } from "~/trpc/react";
@@ -23,8 +26,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "~/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "~/components/ui/alert-dialog";
 
 import { ClientMembersDialog } from "./client-members-dialog";
+import { SettingsViewSkeleton } from "./view-skeletons";
 
 const toCurrency = (amountCents: number): string =>
   new Intl.NumberFormat("en-US", {
@@ -54,6 +68,23 @@ export function SettingsView() {
 
   // Client member management
   const [managingClientId, setManagingClientId] = useState<string | null>(null);
+
+  // Inline editing
+  const [editingClientId, setEditingClientId] = useState<string | null>(null);
+  const [editClientName, setEditClientName] = useState("");
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [editProjectName, setEditProjectName] = useState("");
+
+  // Activity type editing/deleting
+  const [editingActivityId, setEditingActivityId] = useState<string | null>(null);
+  const [editActivityName, setEditActivityName] = useState("");
+  const [deleteActivityDialog, setDeleteActivityDialog] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+
+  // Error state
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
     if (clientsQuery.data?.length && !selectedClientId) {
@@ -99,7 +130,17 @@ export function SettingsView() {
     },
   });
 
-  const [deletingClientId, setDeletingClientId] = useState<string | null>(null);
+  const [deleteClientDialog, setDeleteClientDialog] = useState<{
+    id: string;
+    name: string;
+    projectCount: number;
+  } | null>(null);
+
+  const [deleteProjectDialog, setDeleteProjectDialog] = useState<{
+    id: string;
+    name: string;
+    clientName: string;
+  } | null>(null);
 
   const deleteClient = api.clients.delete.useMutation({
     onSuccess: async () => {
@@ -108,13 +149,62 @@ export function SettingsView() {
         utils.project.list.invalidate(),
         utils.timeEntry.list.invalidate(),
       ]);
-      setDeletingClientId(null);
+      setDeleteClientDialog(null);
+    },
+  });
+
+  const deleteProject = api.project.delete.useMutation({
+    onSuccess: async () => {
+      await Promise.all([
+        utils.project.list.invalidate(),
+        utils.timeEntry.list.invalidate(),
+      ]);
+      setDeleteProjectDialog(null);
+    },
+  });
+
+  const updateClient = api.clients.update.useMutation({
+    onSuccess: async () => {
+      await utils.clients.list.invalidate();
+      setEditingClientId(null);
+    },
+    onError: (error) => setErrorMsg(error.message),
+  });
+
+  const updateProject = api.project.update.useMutation({
+    onSuccess: async () => {
+      await utils.project.list.invalidate();
+      setEditingProjectId(null);
+    },
+    onError: (error) => setErrorMsg(error.message),
+  });
+
+  const updateActivityType = api.activityType.update.useMutation({
+    onSuccess: async () => {
+      await utils.activityType.list.invalidate();
+      setEditingActivityId(null);
+    },
+    onError: (error) => setErrorMsg(error.message),
+  });
+
+  const deleteActivityType = api.activityType.delete.useMutation({
+    onSuccess: async () => {
+      await utils.activityType.list.invalidate();
+      setDeleteActivityDialog(null);
+    },
+    onError: (error) => {
+      setErrorMsg(error.message);
+      setDeleteActivityDialog(null);
     },
   });
 
   const managingClient = clientsQuery.data?.find(
     (c) => c.id === managingClientId,
   );
+
+  if (clientsQuery.isLoading) {
+    return <SettingsViewSkeleton />;
+  }
 
   return (
     <div className="space-y-6">
@@ -125,6 +215,18 @@ export function SettingsView() {
           Manage your workspace: clients, projects, activities, and rates.
         </p>
       </div>
+
+      {errorMsg && (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {errorMsg}
+          <button
+            className="ml-3 text-xs underline"
+            onClick={() => setErrorMsg(null)}
+          >
+            dismiss
+          </button>
+        </div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Clients */}
@@ -165,64 +267,107 @@ export function SettingsView() {
               {clientsQuery.data?.map((client) => (
                 <div
                   key={client.id}
-                  className="flex items-center justify-between rounded-md border border-border/50 bg-background/50 px-3 py-2"
+                  className="group/item flex items-center justify-between rounded-md border border-border/50 bg-background/50 px-3 py-2"
                 >
-                  <span className="text-sm">{client.name}</span>
-                  <div className="flex items-center gap-1.5">
-                    <Badge variant="outline" className="text-[10px]">
-                      {client._count.members}{" "}
-                      {client._count.members === 1 ? "member" : "members"}
-                    </Badge>
-                    <Badge variant="outline" className="text-[10px]">
-                      {client._count.projects}{" "}
-                      {client._count.projects === 1 ? "project" : "projects"}
-                    </Badge>
-                    {client.members?.[0]?.role === "owner" && (
-                      <>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-6 gap-1 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
-                          onClick={() => setManagingClientId(client.id)}
-                        >
-                          <Users className="size-3" />
-                          Members
-                        </Button>
-                        {deletingClientId === client.id ? (
-                          <div className="flex items-center gap-1">
+                  {editingClientId === client.id ? (
+                    <div className="flex flex-1 items-center gap-1.5">
+                      <Input
+                        className="h-7 text-sm"
+                        value={editClientName}
+                        onChange={(e) => setEditClientName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && editClientName.trim()) {
+                            updateClient.mutate({
+                              clientId: client.id,
+                              name: editClientName.trim(),
+                            });
+                          }
+                          if (e.key === "Escape") setEditingClientId(null);
+                        }}
+                        autoFocus
+                      />
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 w-7 shrink-0 p-0 text-teal-500"
+                        onClick={() => {
+                          if (editClientName.trim()) {
+                            updateClient.mutate({
+                              clientId: client.id,
+                              name: editClientName.trim(),
+                            });
+                          }
+                        }}
+                        disabled={updateClient.isPending}
+                      >
+                        <Check className="size-3.5" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 w-7 shrink-0 p-0"
+                        onClick={() => setEditingClientId(null)}
+                      >
+                        <X className="size-3.5" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm">{client.name}</span>
+                        {client.members?.[0]?.role === "owner" && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-6 w-6 p-0 text-muted-foreground/0 transition-colors group-hover/item:text-muted-foreground/40 hover:!text-foreground"
+                            onClick={() => {
+                              setEditingClientId(client.id);
+                              setEditClientName(client.name);
+                            }}
+                          >
+                            <Pencil className="size-3" />
+                          </Button>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <Badge variant="outline" className="text-[10px]">
+                          {client._count.members}{" "}
+                          {client._count.members === 1 ? "member" : "members"}
+                        </Badge>
+                        <Badge variant="outline" className="text-[10px]">
+                          {client._count.projects}{" "}
+                          {client._count.projects === 1 ? "project" : "projects"}
+                        </Badge>
+                        {client.members?.[0]?.role === "owner" && (
+                          <>
                             <Button
                               size="sm"
-                              variant="destructive"
-                              className="h-6 px-1.5 text-[11px]"
-                              disabled={deleteClient.isPending}
-                              onClick={() =>
-                                deleteClient.mutate({ clientId: client.id })
-                              }
+                              variant="ghost"
+                              className="h-6 gap-1 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+                              onClick={() => setManagingClientId(client.id)}
                             >
-                              Confirm
+                              <Users className="size-3" />
+                              Members
                             </Button>
                             <Button
                               size="sm"
                               variant="ghost"
-                              className="h-6 px-1.5 text-[11px]"
-                              onClick={() => setDeletingClientId(null)}
+                              className="h-6 w-6 p-0 text-muted-foreground/40 hover:text-red-400"
+                              onClick={() =>
+                                setDeleteClientDialog({
+                                  id: client.id,
+                                  name: client.name,
+                                  projectCount: client._count.projects,
+                                })
+                              }
                             >
-                              Cancel
+                              <Trash2 className="size-3" />
                             </Button>
-                          </div>
-                        ) : (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-6 w-6 p-0 text-muted-foreground/40 hover:text-red-400"
-                            onClick={() => setDeletingClientId(client.id)}
-                          >
-                            <Trash2 className="size-3" />
-                          </Button>
+                          </>
                         )}
-                      </>
-                    )}
-                  </div>
+                      </div>
+                    </>
+                  )}
                 </div>
               ))}
               {!clientsQuery.data?.length && (
@@ -295,27 +440,109 @@ export function SettingsView() {
               </div>
             </div>
             <div className="space-y-1.5">
-              {projectsQuery.data?.map((project) => (
-                <div
-                  key={project.id}
-                  className="flex items-center justify-between rounded-md border border-border/50 bg-background/50 px-3 py-2"
-                >
-                  <div>
-                    <span className="text-sm">{project.name}</span>
-                    <span className="ml-1.5 text-xs text-muted-foreground">
-                      ({project.client.name})
-                    </span>
+              {projectsQuery.data?.map((project) => {
+                const isOwner = clientsQuery.data?.find(
+                  (c) => c.id === project.client.id,
+                )?.members?.[0]?.role === "owner";
+                return (
+                  <div
+                    key={project.id}
+                    className="group/item flex items-center justify-between rounded-md border border-border/50 bg-background/50 px-3 py-2"
+                  >
+                    {editingProjectId === project.id ? (
+                      <div className="flex flex-1 items-center gap-1.5">
+                        <Input
+                          className="h-7 text-sm"
+                          value={editProjectName}
+                          onChange={(e) => setEditProjectName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && editProjectName.trim()) {
+                              updateProject.mutate({
+                                projectId: project.id,
+                                name: editProjectName.trim(),
+                              });
+                            }
+                            if (e.key === "Escape") setEditingProjectId(null);
+                          }}
+                          autoFocus
+                        />
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 w-7 shrink-0 p-0 text-teal-500"
+                          onClick={() => {
+                            if (editProjectName.trim()) {
+                              updateProject.mutate({
+                                projectId: project.id,
+                                name: editProjectName.trim(),
+                              });
+                            }
+                          }}
+                          disabled={updateProject.isPending}
+                        >
+                          <Check className="size-3.5" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 w-7 shrink-0 p-0"
+                          onClick={() => setEditingProjectId(null)}
+                        >
+                          <X className="size-3.5" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm">{project.name}</span>
+                          <span className="text-xs text-muted-foreground">
+                            ({project.client.name})
+                          </span>
+                          {isOwner && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 w-6 p-0 text-muted-foreground/0 transition-colors group-hover/item:text-muted-foreground/40 hover:!text-foreground"
+                              onClick={() => {
+                                setEditingProjectId(project.id);
+                                setEditProjectName(project.name);
+                              }}
+                            >
+                              <Pencil className="size-3" />
+                            </Button>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          {project.code && (
+                            <Badge
+                              variant="secondary"
+                              className="font-mono text-[10px]"
+                            >
+                              {project.code}
+                            </Badge>
+                          )}
+                          {isOwner && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 w-6 p-0 text-muted-foreground/40 hover:text-red-400"
+                              onClick={() =>
+                                setDeleteProjectDialog({
+                                  id: project.id,
+                                  name: project.name,
+                                  clientName: project.client.name,
+                                })
+                              }
+                            >
+                              <Trash2 className="size-3" />
+                            </Button>
+                          )}
+                        </div>
+                      </>
+                    )}
                   </div>
-                  {project.code && (
-                    <Badge
-                      variant="secondary"
-                      className="font-mono text-[10px]"
-                    >
-                      {project.code}
-                    </Badge>
-                  )}
-                </div>
-              ))}
+                );
+              })}
               {!projectsQuery.data?.length && (
                 <p className="py-3 text-center text-xs text-muted-foreground/50">
                   No projects yet
@@ -361,14 +588,89 @@ export function SettingsView() {
                 Add
               </Button>
             </div>
-            <div className="flex flex-wrap gap-1.5">
+            <div className="space-y-1.5">
               {activitiesQuery.data?.map((activity) => (
-                <Badge key={activity.id} variant="secondary">
-                  {activity.name}
-                </Badge>
+                <div
+                  key={activity.id}
+                  className="group/item flex items-center justify-between rounded-md border border-border/50 bg-background/50 px-3 py-2"
+                >
+                  {editingActivityId === activity.id ? (
+                    <div className="flex flex-1 items-center gap-1.5">
+                      <Input
+                        className="h-7 text-sm"
+                        value={editActivityName}
+                        onChange={(e) => setEditActivityName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && editActivityName.trim()) {
+                            updateActivityType.mutate({
+                              activityTypeId: activity.id,
+                              name: editActivityName.trim(),
+                            });
+                          }
+                          if (e.key === "Escape") setEditingActivityId(null);
+                        }}
+                        autoFocus
+                      />
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 w-7 shrink-0 p-0 text-teal-500"
+                        onClick={() => {
+                          if (editActivityName.trim()) {
+                            updateActivityType.mutate({
+                              activityTypeId: activity.id,
+                              name: editActivityName.trim(),
+                            });
+                          }
+                        }}
+                        disabled={updateActivityType.isPending}
+                      >
+                        <Check className="size-3.5" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 w-7 shrink-0 p-0"
+                        onClick={() => setEditingActivityId(null)}
+                      >
+                        <X className="size-3.5" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm">{activity.name}</span>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 w-6 p-0 text-muted-foreground/0 transition-colors group-hover/item:text-muted-foreground/40 hover:!text-foreground"
+                          onClick={() => {
+                            setEditingActivityId(activity.id);
+                            setEditActivityName(activity.name);
+                          }}
+                        >
+                          <Pencil className="size-3" />
+                        </Button>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 w-6 p-0 text-muted-foreground/0 transition-colors group-hover/item:text-muted-foreground/40 hover:!text-red-400"
+                        onClick={() =>
+                          setDeleteActivityDialog({
+                            id: activity.id,
+                            name: activity.name,
+                          })
+                        }
+                      >
+                        <Trash2 className="size-3" />
+                      </Button>
+                    </>
+                  )}
+                </div>
               ))}
               {!activitiesQuery.data?.length && (
-                <p className="py-3 text-center text-xs text-muted-foreground/50 w-full">
+                <p className="py-3 text-center text-xs text-muted-foreground/50">
                   No activity types yet
                 </p>
               )}
@@ -445,6 +747,111 @@ export function SettingsView() {
           onOpenChange={(open) => !open && setManagingClientId(null)}
         />
       )}
+
+      {/* Delete Client Dialog */}
+      <AlertDialog
+        open={!!deleteClientDialog}
+        onOpenChange={(open) => !open && setDeleteClientDialog(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Client?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete{" "}
+              <span className="font-semibold text-foreground">
+                {deleteClientDialog?.name}
+              </span>{" "}
+              and all associated data: {deleteClientDialog?.projectCount}{" "}
+              {deleteClientDialog?.projectCount === 1 ? "project" : "projects"},
+              all time entries, members, rate overrides, and reports. This
+              cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleteClient.isPending}
+              onClick={() => {
+                if (deleteClientDialog) {
+                  deleteClient.mutate({ clientId: deleteClientDialog.id });
+                }
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete Project Dialog */}
+      <AlertDialog
+        open={!!deleteProjectDialog}
+        onOpenChange={(open) => !open && setDeleteProjectDialog(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Project?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete{" "}
+              <span className="font-semibold text-foreground">
+                {deleteProjectDialog?.name}
+              </span>{" "}
+              from {deleteProjectDialog?.clientName} and all associated time
+              entries and rate overrides. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleteProject.isPending}
+              onClick={() => {
+                if (deleteProjectDialog) {
+                  deleteProject.mutate({ projectId: deleteProjectDialog.id });
+                }
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete Activity Type Dialog */}
+      <AlertDialog
+        open={!!deleteActivityDialog}
+        onOpenChange={(open) => !open && setDeleteActivityDialog(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Activity Type?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete{" "}
+              <span className="font-semibold text-foreground">
+                {deleteActivityDialog?.name}
+              </span>
+              . Activity types that are in use by time entries cannot be deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleteActivityType.isPending}
+              onClick={() => {
+                if (deleteActivityDialog) {
+                  deleteActivityType.mutate({
+                    activityTypeId: deleteActivityDialog.id,
+                  });
+                }
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

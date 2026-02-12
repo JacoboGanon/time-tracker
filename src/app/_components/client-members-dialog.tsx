@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Plus, Search, Trash2, Users, X } from "lucide-react";
 
 import { api } from "~/trpc/react";
+import { authClient } from "~/server/better-auth/client";
 import { Avatar, AvatarFallback } from "~/components/ui/avatar";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
@@ -14,6 +15,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "~/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "~/components/ui/select";
 import { Separator } from "~/components/ui/separator";
 import { ScrollArea } from "~/components/ui/scroll-area";
 
@@ -166,6 +174,18 @@ export function ClientMembersDialog({
         utils.clients.list.invalidate(),
       ]),
   });
+
+  const updateMemberRole = api.clients.updateMemberRole.useMutation({
+    onSuccess: async () => {
+      await Promise.all([
+        utils.clients.listMembers.invalidate({ clientId }),
+        utils.clients.list.invalidate(),
+      ]);
+    },
+  });
+
+  const { data: session } = authClient.useSession();
+  const currentUserId = session?.user?.id;
 
   // Reset search state when dialog closes
   useEffect(() => {
@@ -331,11 +351,34 @@ export function ClientMembersDialog({
                       <span className="truncate text-sm font-medium">
                         {member.user.name}
                       </span>
-                      {isOwner && (
-                        <span className="shrink-0 rounded-full bg-teal-600/15 px-1.5 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-wider text-teal-500">
-                          owner
-                        </span>
-                      )}
+                      <Select
+                        value={member.role}
+                        onValueChange={(role: "owner" | "member") =>
+                          updateMemberRole.mutate({
+                            clientId,
+                            userId: member.user.id,
+                            role,
+                          })
+                        }
+                        disabled={
+                          member.user.id === currentUserId ||
+                          updateMemberRole.isPending
+                        }
+                      >
+                        <SelectTrigger
+                          className={`h-5 w-auto gap-1 border-none bg-transparent px-1.5 py-0 font-mono text-[9px] font-semibold uppercase tracking-wider shadow-none ${
+                            member.role === "owner"
+                              ? "text-teal-500"
+                              : "text-muted-foreground"
+                          }`}
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="owner">Owner</SelectItem>
+                          <SelectItem value="member">Member</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
                     <span className="text-[11px] leading-none text-muted-foreground/70">
                       {member.user.email}
