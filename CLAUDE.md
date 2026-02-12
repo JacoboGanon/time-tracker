@@ -17,7 +17,8 @@ Time Tracker — a full-stack TypeScript application built on the **T3 Stack** (
 | `bun run typecheck` | TypeScript type check only |
 | `bun run format:check` | Check Prettier formatting |
 | `bun run format:write` | Auto-format all files |
-| `bun run test` | Run tests (Bun test runner) |
+| `bun run test` | Run all tests (Bun test runner) |
+| `bun test src/server/services/__tests__/permissions.test.ts` | Run a single test file |
 | `bun run db:generate` | Generate Prisma Client + create migration |
 | `bun run db:push` | Push schema changes without migration |
 | `bun run db:migrate` | Deploy migrations |
@@ -31,26 +32,32 @@ Time Tracker — a full-stack TypeScript application built on the **T3 Stack** (
 ### Stack
 - **Next.js 15** with App Router, React 19, Server Components by default
 - **tRPC 11** for end-to-end type-safe API (no REST, no code generation)
-- **Prisma 6** with PostgreSQL, client generated to `generated/prisma/` (excluded from tsconfig)
+- **Prisma 6** with PostgreSQL, client generated to `generated/prisma/` (excluded from tsconfig — import from `"../../generated/prisma"` or relative paths, not via `~/`)
 - **Better-Auth** — handles sessions, OAuth, email verification, password reset
 - **Tailwind CSS v4** via `@tailwindcss/postcss` plugin (not classic config file)
 - **shadcn/ui** (new-york style, RSC-enabled) with Radix UI primitives and Lucide icons
 - **Bun** as package manager and test runner (ESM with `"type": "module"`)
 
-### Path Alias
-`~/*` maps to `./src/*` (configured in tsconfig.json)
+### Path Alias & Import Conventions
+- `~/*` maps to `./src/*` (configured in tsconfig.json)
+- Use inline type imports: `import { type Foo } from "~/..."` (enforced by ESLint `consistent-type-imports`)
 
 ### Key Directories
 - `src/server/api/routers/` — tRPC routers: `time-entry`, `project`, `client`, `report`, `rate`, `activity-type`
 - `src/server/api/root.ts` — registers all routers (add new routers here)
 - `src/server/api/trpc.ts` — context, middleware, procedure definitions
-- `src/server/api/utils/` — access-control helpers (`getProjectMembershipOrThrow`, `assertCanManageProject`)
+- `src/server/api/utils/` — access-control helpers (`getClientMembershipOrThrow`, `getClientMembershipForProject`, `assertClientOwner`)
 - `src/server/services/` — business logic: `permissions`, `time-entry-validation`, `rates`, `reporting`, `report-pdf`
 - `src/server/better-auth/` — auth config (`config.ts`), server helper (`server.ts`), client hook (`client.ts`)
 - `src/server/emails/` — React Email templates
 - `src/trpc/` — client wiring: `server.ts` (RSC caller), `react.tsx` (client provider), `query-client.ts`, `query-behavior.ts`
 - `src/components/ui/` — shadcn components
 - `src/app/_components/` — dashboard views: `timer-view`, `entries-view`, `reports-view`, `settings-view`
+
+### Testing
+- Bun test runner with `import { describe, expect, it } from "bun:test"`
+- Tests live in `__tests__/` directories alongside source (e.g., `src/server/services/__tests__/`)
+- Pure unit tests — no database or mocking framework
 
 ### tRPC Patterns
 - **`publicProcedure`** — no auth required
@@ -62,16 +69,17 @@ Time Tracker — a full-stack TypeScript application built on the **T3 Stack** (
 - Server Components use `createCaller` from `src/trpc/server.ts`; client components use hooks from `src/trpc/react.tsx`
 
 ### Role-Based Access Control
-Four project roles: `owner` > `manager` > `member` > `viewer`
-- **View project** — all roles
-- **Manage project** — owner, manager
+Access control is at the **client level** via `ClientMember` with two roles: `owner` > `member`
+- **View client & its projects** — both roles (membership required)
+- **Manage projects / client settings** — owner only
 - **Manage membership** — owner only
-- **Edit time entries** — owner/manager can edit any; member can edit own only
+- **Edit time entries** — owner can edit any; member can edit own only
+- **Delete client** — owner only (cascades to projects)
 
-Authorization checks use helpers in `src/server/services/permissions.ts` and `src/server/api/utils/project-access.ts`. Always use `getProjectMembershipOrThrow()` to validate project access in router procedures.
+Authorization checks use helpers in `src/server/services/permissions.ts` and `src/server/api/utils/client-access.ts`. Use `getClientMembershipForProject()` to validate access via a project's parent client, or `getClientMembershipOrThrow()` / `assertClientOwner()` for direct client access checks.
 
 ### Data Model
-Core entities: `User`, `Client`, `Project`, `ProjectMember` (with role), `TimeEntry`, `ActivityType`, `RateCard`, `ProjectRateOverride`, `Report`, `TimeEntryAudit`
+Core entities: `User`, `Client`, `ClientMember` (with role: owner/member), `Project`, `TimeEntry`, `ActivityType`, `RateCard`, `ProjectRateOverride`, `Report`, `TimeEntryAudit`
 
 - Time entries support two modes: manual (start + end) and stopwatch (running timer)
 - Overlap checking prevents concurrent time entries for the same user
@@ -101,7 +109,7 @@ Validated via Zod in `src/env.js`. Required server-side vars:
 Can skip validation with `SKIP_ENV_VALIDATION=true`.
 
 ### Design System
-- Color palette: stone neutrals + amber accent, OKLch color space
+- Color palette: stone neutrals + teal accent (amber for warnings), OKLch color space
 - Fonts: DM Sans (UI), JetBrains Mono (data/mono)
 - Theme support via `next-themes` (ThemeProvider in root layout, default: dark)
 - Custom CSS variables defined in `src/styles/globals.css`

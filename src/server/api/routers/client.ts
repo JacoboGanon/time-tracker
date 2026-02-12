@@ -7,14 +7,20 @@ import { assertClientOwner } from "~/server/api/utils/client-access";
 export const clientRouter = createTRPCRouter({
   list: protectedProcedure.query(({ ctx }) => {
     return ctx.db.client.findMany({
+      where: {
+        members: { some: { userId: ctx.session.user.id } },
+      },
       select: {
         id: true,
         name: true,
         description: true,
         isActive: true,
-        createdById: true,
         createdAt: true,
         updatedAt: true,
+        members: {
+          where: { userId: ctx.session.user.id },
+          select: { role: true },
+        },
         _count: { select: { members: true, projects: true } },
       },
       orderBy: { name: "asc" },
@@ -47,6 +53,7 @@ export const clientRouter = createTRPCRouter({
           data: {
             clientId: client.id,
             userId: ctx.session.user.id,
+            role: "owner",
           },
         });
 
@@ -79,6 +86,18 @@ export const clientRouter = createTRPCRouter({
       });
     }),
 
+  delete: protectedProcedure
+    .input(z.object({ clientId: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      await assertClientOwner(ctx, input.clientId);
+
+      await ctx.db.client.delete({
+        where: { id: input.clientId },
+      });
+
+      return { success: true };
+    }),
+
   listMembers: protectedProcedure
     .input(z.object({ clientId: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
@@ -106,40 +125,19 @@ export const clientRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       await assertClientOwner(ctx, input.clientId);
 
-      return ctx.db.$transaction(async (tx) => {
-        const member = await tx.clientMember.upsert({
-          where: {
-            clientId_userId: {
-              clientId: input.clientId,
-              userId: input.userId,
-            },
-          },
-          update: {},
-          create: {
+      return ctx.db.clientMember.upsert({
+        where: {
+          clientId_userId: {
             clientId: input.clientId,
             userId: input.userId,
-            hourlyRateCents: input.hourlyRateCents ?? null,
           },
-        });
-
-        // Auto-add to all projects under this client
-        const projects = await tx.project.findMany({
-          where: { clientId: input.clientId },
-          select: { id: true },
-        });
-
-        if (projects.length > 0) {
-          await tx.projectMember.createMany({
-            data: projects.map((project) => ({
-              projectId: project.id,
-              userId: input.userId,
-              role: "member" as const,
-            })),
-            skipDuplicates: true,
-          });
-        }
-
-        return member;
+        },
+        update: {},
+        create: {
+          clientId: input.clientId,
+          userId: input.userId,
+          hourlyRateCents: input.hourlyRateCents ?? null,
+        },
       });
     }),
 
@@ -193,9 +191,11 @@ export const clientRouter = createTRPCRouter({
     }),
 
   listAllUsers: protectedProcedure.query(async ({ ctx }) => {
-    // Only client owners need this (for adding members) — restrict access
-    const ownedClient = await ctx.db.client.findFirst({
-      where: { createdById: ctx.session.user.id },
+    const ownedClient = await ctx.db.clientMember.findFirst({
+      where: {
+        userId: ctx.session.user.id,
+        role: "owner",
+      },
       select: { id: true },
     });
 

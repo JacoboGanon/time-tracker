@@ -7,11 +7,11 @@ import {
   FolderPlus,
   Plus,
   Tag,
+  Trash2,
   Users,
 } from "lucide-react";
 
 import { api } from "~/trpc/react";
-import { authClient } from "~/server/better-auth/client";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Badge } from "~/components/ui/badge";
@@ -34,9 +34,6 @@ const toCurrency = (amountCents: number): string =>
 
 export function SettingsView() {
   const utils = api.useUtils();
-  const session = authClient.useSession();
-  const currentUserId = session.data?.user?.id;
-
   const clientsQuery = api.clients.list.useQuery();
   const projectsQuery = api.project.list.useQuery();
   const activitiesQuery = api.activityType.list.useQuery();
@@ -99,6 +96,19 @@ export function SettingsView() {
   const updateRate = api.rate.setMyDefaultRate.useMutation({
     onSuccess: async () => {
       await utils.rate.getMyDefaultRate.invalidate();
+    },
+  });
+
+  const [deletingClientId, setDeletingClientId] = useState<string | null>(null);
+
+  const deleteClient = api.clients.delete.useMutation({
+    onSuccess: async () => {
+      await Promise.all([
+        utils.clients.list.invalidate(),
+        utils.project.list.invalidate(),
+        utils.timeEntry.list.invalidate(),
+      ]);
+      setDeletingClientId(null);
     },
   });
 
@@ -167,16 +177,50 @@ export function SettingsView() {
                       {client._count.projects}{" "}
                       {client._count.projects === 1 ? "project" : "projects"}
                     </Badge>
-                    {client.createdById === currentUserId && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-6 gap-1 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
-                        onClick={() => setManagingClientId(client.id)}
-                      >
-                        <Users className="size-3" />
-                        Members
-                      </Button>
+                    {client.members?.[0]?.role === "owner" && (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 gap-1 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+                          onClick={() => setManagingClientId(client.id)}
+                        >
+                          <Users className="size-3" />
+                          Members
+                        </Button>
+                        {deletingClientId === client.id ? (
+                          <div className="flex items-center gap-1">
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              className="h-6 px-1.5 text-[11px]"
+                              disabled={deleteClient.isPending}
+                              onClick={() =>
+                                deleteClient.mutate({ clientId: client.id })
+                              }
+                            >
+                              Confirm
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 px-1.5 text-[11px]"
+                              onClick={() => setDeletingClientId(null)}
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-6 w-6 p-0 text-muted-foreground/40 hover:text-red-400"
+                            onClick={() => setDeletingClientId(client.id)}
+                          >
+                            <Trash2 className="size-3" />
+                          </Button>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
@@ -393,11 +437,10 @@ export function SettingsView() {
       </div>
 
       {/* Client Members Dialog */}
-      {managingClient && currentUserId && (
+      {managingClient && (
         <ClientMembersDialog
           clientId={managingClient.id}
           clientName={managingClient.name}
-          currentUserId={currentUserId}
           open={!!managingClientId}
           onOpenChange={(open) => !open && setManagingClientId(null)}
         />

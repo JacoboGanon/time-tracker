@@ -1,20 +1,18 @@
-export type ProjectRole = "owner" | "manager" | "member" | "viewer";
+export type ClientRole = "owner" | "member";
 
 type EditEntryInput = {
-  role: ProjectRole;
+  role: ClientRole;
   requesterId: string;
   entryUserId: string;
 };
 
-export const canViewProject = (_role: ProjectRole): boolean => true;
+export const canManageProject = (role: ClientRole): boolean =>
+  role === "owner";
 
-export const canManageProject = (role: ProjectRole): boolean =>
-  role === "owner" || role === "manager";
+export const canViewAllEntries = (role: ClientRole): boolean =>
+  role === "owner";
 
-export const canViewAllEntries = (role: ProjectRole): boolean =>
-  role === "owner" || role === "manager";
-
-export const canManageMembership = (role: ProjectRole): boolean =>
+export const canManageMembership = (role: ClientRole): boolean =>
   role === "owner";
 
 export const canEditEntry = ({
@@ -22,7 +20,7 @@ export const canEditEntry = ({
   requesterId,
   entryUserId,
 }: EditEntryInput): boolean => {
-  if (role === "owner" || role === "manager") {
+  if (role === "owner") {
     return true;
   }
 

@@ -16,6 +16,14 @@ import {
 import { authClient } from "~/server/better-auth/client";
 import { api } from "~/trpc/react";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "~/components/ui/select";
+import { useClientFilter, useFilteredProjects } from "./client-filter-context";
+import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
@@ -47,11 +55,12 @@ interface AppSidebarProps {
   userName: string;
 }
 
+const ALL_CLIENTS_VALUE = "__all__";
+
 export function AppSidebar({ activeView, onNavigate, userName }: AppSidebarProps) {
-  const projectsQuery = api.project.list.useQuery();
   const clientsQuery = api.clients.list.useQuery();
-  const session = authClient.useSession();
-  const currentUserId = session.data?.user?.id;
+  const { data: filteredProjects } = useFilteredProjects();
+  const { selectedClientId, setSelectedClientId } = useClientFilter();
   const [managingClientId, setManagingClientId] = useState<string | null>(null);
 
   const initials = userName
@@ -63,7 +72,7 @@ export function AppSidebar({ activeView, onNavigate, userName }: AppSidebarProps
 
   const projectsByClient = (clientsQuery.data ?? []).map((client) => ({
     ...client,
-    projects: (projectsQuery.data ?? []).filter((p) => p.client.id === client.id),
+    projects: (filteredProjects ?? []).filter((p) => p.client.id === client.id),
   }));
 
   return (
@@ -119,6 +128,26 @@ export function AppSidebar({ activeView, onNavigate, userName }: AppSidebarProps
             Projects
           </SidebarGroupLabel>
           <SidebarGroupContent>
+            <div className="mb-2 px-2 group-has-[[data-collapsible=icon]]/sidebar-wrapper:hidden">
+              <Select
+                value={selectedClientId ?? ALL_CLIENTS_VALUE}
+                onValueChange={(v) =>
+                  setSelectedClientId(v === ALL_CLIENTS_VALUE ? null : v)
+                }
+              >
+                <SelectTrigger className="h-7 text-xs">
+                  <SelectValue placeholder="All Clients" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL_CLIENTS_VALUE}>All Clients</SelectItem>
+                  {clientsQuery.data?.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <SidebarMenu>
               {projectsByClient.map((client) =>
                 client.projects.length > 0 ? (
@@ -127,7 +156,7 @@ export function AppSidebar({ activeView, onNavigate, userName }: AppSidebarProps
                       <p className="flex-1 truncate text-[10px] font-medium tracking-widest text-muted-foreground/60 uppercase">
                         {client.name}
                       </p>
-                      {client.createdById === currentUserId && (
+                      {client.members?.[0]?.role === "owner" && (
                         <button
                           onClick={() => setManagingClientId(client.id)}
                           className="flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:bg-accent hover:text-muted-foreground group-has-[[data-collapsible=icon]]/sidebar-wrapper:hidden"
@@ -156,7 +185,7 @@ export function AppSidebar({ activeView, onNavigate, userName }: AppSidebarProps
                   </div>
                 ) : null,
               )}
-              {!projectsQuery.data?.length && (
+              {!filteredProjects?.length && (
                 <p className="px-2 py-2 text-xs text-muted-foreground/50">
                   No projects yet
                 </p>
@@ -196,14 +225,13 @@ export function AppSidebar({ activeView, onNavigate, userName }: AppSidebarProps
       </SidebarFooter>
 
       {/* Client Members Dialog */}
-      {managingClientId && currentUserId && (
+      {managingClientId && (
         <ClientMembersDialog
           clientId={managingClientId}
           clientName={
             clientsQuery.data?.find((c) => c.id === managingClientId)?.name ??
             ""
           }
-          currentUserId={currentUserId}
           open={!!managingClientId}
           onOpenChange={(open) => !open && setManagingClientId(null)}
         />

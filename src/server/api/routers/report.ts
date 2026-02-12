@@ -31,13 +31,45 @@ const buildSummaryFromFilters = async (params: {
   userId: string;
   filters: z.infer<typeof reportFiltersSchema>;
 }) => {
-  // Get memberships with roles for access control
-  const memberships = await params.ctx.db.projectMember.findMany({
+  // Get client memberships for access control
+  const memberships = await params.ctx.db.clientMember.findMany({
     where: { userId: params.userId },
-    select: { projectId: true, role: true },
+    select: { clientId: true, role: true },
   });
 
-  const projectIds = memberships.map((m) => m.projectId);
+  if (memberships.length === 0) {
+    return {
+      summary: buildReportSummary({ entries: [] }),
+      entryCount: 0,
+      hasFullAccess: false,
+    };
+  }
+
+  const clientIds = memberships.map((m) => m.clientId);
+
+  // Get accessible projects
+  const projectWhere: Record<string, unknown> = {
+    clientId: { in: clientIds },
+  };
+  if (params.filters.clientId) {
+    if (!clientIds.includes(params.filters.clientId)) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "You do not have access to this client",
+      });
+    }
+    projectWhere.clientId = params.filters.clientId;
+  }
+  if (params.filters.projectId) {
+    projectWhere.id = params.filters.projectId;
+  }
+
+  const projects = await params.ctx.db.project.findMany({
+    where: projectWhere,
+    select: { id: true, clientId: true },
+  });
+
+  const projectIds = projects.map((p) => p.id);
   if (projectIds.length === 0) {
     return {
       summary: buildReportSummary({ entries: [] }),
@@ -46,37 +78,23 @@ const buildSummaryFromFilters = async (params: {
     };
   }
 
-  if (params.filters.projectId && !projectIds.includes(params.filters.projectId)) {
-    throw new TRPCError({
-      code: "FORBIDDEN",
-      message: "You do not have access to this project",
-    });
-  }
+  // Check if user has owner access on ALL relevant clients
+  const relevantClientIds = Array.from(new Set(projects.map((p) => p.clientId)));
+  const hasFullAccess = relevantClientIds.every((cid) => {
+    const m = memberships.find((mem) => mem.clientId === cid);
+    return m?.role === "owner";
+  });
 
-  const allowedProjectIds = params.filters.projectId
-    ? [params.filters.projectId]
-    : projectIds;
-
-  // Check if user has manager/owner access on ALL queried projects.
-  // If they are member/viewer on ANY project in the query, restrict data.
-  const queriedMemberships = memberships.filter((m) =>
-    allowedProjectIds.includes(m.projectId),
-  );
-  const hasFullAccess = queriedMemberships.length > 0 && queriedMemberships.every(
-    (m) => m.role === "owner" || m.role === "manager",
-  );
-
-  // Restricted users can only see their own entries, never another member's
+  // Restricted users can only see their own entries
   const effectiveMemberId = hasFullAccess
     ? params.filters.memberId
     : params.userId;
 
   const entries = await params.ctx.db.timeEntry.findMany({
     where: {
-      projectId: { in: allowedProjectIds },
+      projectId: { in: projectIds },
       startAt: { gte: params.filters.startDate },
       endAt: { lte: params.filters.endDate },
-      clientId: params.filters.clientId,
       userId: effectiveMemberId,
       activityTypeId: params.filters.activityTypeId,
     },

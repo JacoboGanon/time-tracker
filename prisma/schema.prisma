@@ -15,11 +15,9 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum ProjectRole {
+enum ClientRole {
   owner
-  manager
   member
-  viewer
 }
 
 enum TimeEntrySource {
@@ -37,7 +35,6 @@ model User {
   updatedAt             DateTime              @default(now()) @updatedAt
   sessions              Session[]
   accounts              Account[]
-  projectMemberships    ProjectMember[]
   timeEntries           TimeEntry[]
   rateCard              RateCard?
   projectRateOverrides  ProjectRateOverride[]
@@ -69,15 +66,16 @@ model Client {
 }
 
 model ClientMember {
-  id              String   @id @default(cuid())
+  id              String     @id @default(cuid())
   clientId        String
   userId          String
+  role            ClientRole @default(member)
   hourlyRateCents Int?
-  currency        String   @default("USD")
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  client          Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  currency        String     @default("USD")
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  client          Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  user            User       @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([clientId, userId])
   @@index([userId])
@@ -93,7 +91,6 @@ model Project {
   createdAt     DateTime              @default(now())
   updatedAt     DateTime              @updatedAt
   client        Client                @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  members       ProjectMember[]
   timeEntries   TimeEntry[]
   rateOverrides ProjectRateOverride[]
   reports       Report[]
@@ -102,19 +99,6 @@ model Project {
   @@index([clientId, isActive])
 }
 
-model ProjectMember {
-  id        String      @id @default(cuid())
-  projectId String
-  userId    String
-  role      ProjectRole
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
-  project   Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([projectId, userId])
-  @@index([userId, role])
-}
 
 model ActivityType {
   id                String      @id @default(cuid())

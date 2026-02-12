@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 
 import { api } from "~/trpc/react";
+import { useFilteredProjects } from "./client-filter-context";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
@@ -52,7 +53,7 @@ const formatHours = (minutes: number): string =>
 
 export function TimerView() {
   const utils = api.useUtils();
-  const projectsQuery = api.project.list.useQuery();
+  const { data: projects } = useFilteredProjects();
   const activitiesQuery = api.activityType.list.useQuery();
 
   // Stopwatch state
@@ -76,14 +77,17 @@ export function TimerView() {
 
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Auto-select first project/activity
+  // Auto-select first project/activity + reset when filtered out
   useEffect(() => {
-    if (projectsQuery.data?.length) {
-      const first = projectsQuery.data[0]!.id;
-      if (!swProjectId) setSwProjectId(first);
-      if (!meProjectId) setMeProjectId(first);
+    if (!projects?.length) return;
+    const ids = new Set(projects.map((p) => p.id));
+    if (!swProjectId || (!ids.has(swProjectId) && !swStartedAt)) {
+      setSwProjectId(projects[0]!.id);
     }
-  }, [projectsQuery.data, swProjectId, meProjectId]);
+    if (!meProjectId || !ids.has(meProjectId)) {
+      setMeProjectId(projects[0]!.id);
+    }
+  }, [projects, swProjectId, meProjectId, swStartedAt]);
 
   useEffect(() => {
     if (activitiesQuery.data?.length) {
@@ -252,7 +256,7 @@ export function TimerView() {
                     <SelectValue placeholder="Select project" />
                   </SelectTrigger>
                   <SelectContent>
-                    {projectsQuery.data?.map((p) => (
+                    {projects?.map((p) => (
                       <SelectItem key={p.id} value={p.id}>
                         {p.name}
                       </SelectItem>
@@ -363,7 +367,7 @@ export function TimerView() {
                       <SelectValue placeholder="Select project" />
                     </SelectTrigger>
                     <SelectContent>
-                      {projectsQuery.data?.map((p) => (
+                      {projects?.map((p) => (
                         <SelectItem key={p.id} value={p.id}>
                           {p.name}
                         </SelectItem>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   CalendarDays,
   Check,
@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 
 import { api } from "~/trpc/react";
+import { useFilteredProjects } from "./client-filter-context";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
@@ -54,7 +55,7 @@ const ALL_VALUE = "__all__";
 
 export function EntriesView() {
   const utils = api.useUtils();
-  const projectsQuery = api.project.list.useQuery();
+  const { data: projects } = useFilteredProjects();
   const activitiesQuery = api.activityType.list.useQuery();
 
   const [filterStart, setFilterStart] = useState(
@@ -65,6 +66,14 @@ export function EntriesView() {
   );
   const [filterProject, setFilterProject] = useState(ALL_VALUE);
   const [filterActivity, setFilterActivity] = useState(ALL_VALUE);
+
+  // Reset project filter when selected project leaves the filtered list
+  useEffect(() => {
+    if (filterProject === ALL_VALUE || !projects) return;
+    if (!projects.some((p) => p.id === filterProject)) {
+      setFilterProject(ALL_VALUE);
+    }
+  }, [projects, filterProject]);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
@@ -192,7 +201,7 @@ export function EntriesView() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={ALL_VALUE}>All Projects</SelectItem>
-              {projectsQuery.data?.map((p) => (
+              {projects?.map((p) => (
                 <SelectItem key={p.id} value={p.id}>
                   {p.name}
                 </SelectItem>

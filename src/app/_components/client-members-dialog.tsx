@@ -128,13 +128,11 @@ function MemberRateInput({
 export function ClientMembersDialog({
   clientId,
   clientName,
-  currentUserId,
   open,
   onOpenChange,
 }: {
   clientId: string;
   clientName: string;
-  currentUserId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -156,7 +154,6 @@ export function ClientMembersDialog({
       await Promise.all([
         utils.clients.listMembers.invalidate({ clientId }),
         utils.clients.list.invalidate(),
-        utils.project.list.invalidate(),
       ]);
       setSearch("");
     },
@@ -311,7 +308,7 @@ export function ClientMembersDialog({
         <ScrollArea className="max-h-72">
           <div className="space-y-1 px-6 pb-6">
             {members.map((member) => {
-              const isOwner = member.user.id === currentUserId;
+              const isOwner = member.role === "owner";
               return (
                 <div
                   key={member.id}

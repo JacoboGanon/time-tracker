@@ -6,7 +6,7 @@ import {
   createTRPCRouter,
   protectedProcedure,
 } from "~/server/api/trpc";
-import { getProjectMembershipOrThrow } from "~/server/api/utils/project-access";
+import { getClientMembershipForProject } from "~/server/api/utils/client-access";
 import { canEditEntry } from "~/server/services/permissions";
 import {
   ensureNoOverlaps,
@@ -60,15 +60,6 @@ const updateEntrySchema = z
   );
 
 type Context = Awaited<ReturnType<typeof createTRPCContext>>;
-
-const assertCanCreateEntry = (role: string) => {
-  if (role === "viewer") {
-    throw new TRPCError({
-      code: "FORBIDDEN",
-      message: "Viewers cannot create time entries",
-    });
-  }
-};
 
 const checkOverlapForUser = async (params: {
   ctx: Context;
@@ -159,53 +150,44 @@ export const timeEntryRouter = createTRPCRouter({
   list: protectedProcedure
     .input(listFiltersSchema.optional())
     .query(async ({ ctx, input }) => {
-      const memberships = await ctx.db.projectMember.findMany({
+      const memberships = await ctx.db.clientMember.findMany({
         where: { userId: ctx.session.user.id },
-        select: { projectId: true, role: true },
+        select: { clientId: true, role: true },
       });
 
       if (memberships.length === 0) {
         return [];
       }
 
-      const allProjectIds = memberships.map((m) => m.projectId);
-      const managerProjectIds = memberships
-        .filter((m) => m.role === "owner" || m.role === "manager")
-        .map((m) => m.projectId);
-      const restrictedProjectIds = memberships
-        .filter((m) => m.role === "member" || m.role === "viewer")
-        .map((m) => m.projectId);
+      const allClientIds = memberships.map((m) => m.clientId);
+      const ownerClientIds = memberships
+        .filter((m) => m.role === "owner")
+        .map((m) => m.clientId);
+      const memberClientIds = memberships
+        .filter((m) => m.role === "member")
+        .map((m) => m.clientId);
 
-      // Apply project filter if specified
-      const requestedProjectIds = input?.projectId
-        ? allProjectIds.filter((id) => id === input.projectId)
-        : allProjectIds;
-
-      if (requestedProjectIds.length === 0) {
-        return [];
-      }
+      // Get project IDs if a specific project filter is applied
+      const projectFilter = input?.projectId
+        ? { projectId: input.projectId }
+        : {};
 
       // Build per-role query conditions:
-      // - owner/manager projects: respect memberId filter or show all
-      // - member/viewer projects: only show own entries
+      // - owner clients: respect memberId filter or show all
+      // - member clients: only show own entries
       const orConditions: Record<string, unknown>[] = [];
 
-      const managerFiltered = requestedProjectIds.filter((id) =>
-        managerProjectIds.includes(id),
-      );
-      const restrictedFiltered = requestedProjectIds.filter((id) =>
-        restrictedProjectIds.includes(id),
-      );
-
-      if (managerFiltered.length > 0) {
+      if (ownerClientIds.length > 0) {
         orConditions.push({
-          projectId: { in: managerFiltered },
+          clientId: { in: ownerClientIds },
+          ...projectFilter,
           ...(input?.memberId ? { userId: input.memberId } : {}),
         });
       }
-      if (restrictedFiltered.length > 0) {
+      if (memberClientIds.length > 0) {
         orConditions.push({
-          projectId: { in: restrictedFiltered },
+          clientId: { in: memberClientIds },
+          ...projectFilter,
           userId: ctx.session.user.id,
         });
       }
@@ -220,7 +202,11 @@ export const timeEntryRouter = createTRPCRouter({
           startAt: input?.startDate ? { gte: input.startDate } : undefined,
           endAt: input?.endDate ? { lte: input.endDate } : undefined,
           activityTypeId: input?.activityTypeId,
-          clientId: input?.clientId,
+          clientId: input?.clientId
+            ? allClientIds.includes(input.clientId)
+              ? input.clientId
+              : undefined
+            : undefined,
         },
         include: {
           project: {
@@ -241,8 +227,7 @@ export const timeEntryRouter = createTRPCRouter({
   createManual: protectedProcedure
     .input(manualEntrySchema)
     .mutation(async ({ ctx, input }) => {
-      const membership = await getProjectMembershipOrThrow(ctx, input.projectId);
-      assertCanCreateEntry(membership.role);
+      const membership = await getClientMembershipForProject(ctx, input.projectId);
 
       const { durationMinutes } = validateTimeEntryInput({
         startAt: input.startAt,
@@ -286,8 +271,7 @@ export const timeEntryRouter = createTRPCRouter({
   createFromStopwatch: protectedProcedure
     .input(stopwatchEntrySchema)
     .mutation(async ({ ctx, input }) => {
-      const membership = await getProjectMembershipOrThrow(ctx, input.projectId);
-      assertCanCreateEntry(membership.role);
+      const membership = await getClientMembershipForProject(ctx, input.projectId);
 
       const { durationMinutes } = validateTimeEntryInput({
         startAt: input.startedAt,
@@ -339,7 +323,7 @@ export const timeEntryRouter = createTRPCRouter({
         throw new TRPCError({ code: "NOT_FOUND", message: "Entry not found" });
       }
 
-      const membership = await getProjectMembershipOrThrow(ctx, existingEntry.projectId);
+      const membership = await getClientMembershipForProject(ctx, existingEntry.projectId);
       const allowedToEdit = canEditEntry({
         role: membership.role,
         requesterId: ctx.session.user.id,
@@ -432,7 +416,7 @@ export const timeEntryRouter = createTRPCRouter({
         throw new TRPCError({ code: "NOT_FOUND", message: "Entry not found" });
       }
 
-      const membership = await getProjectMembershipOrThrow(ctx, existingEntry.projectId);
+      const membership = await getClientMembershipForProject(ctx, existingEntry.projectId);
       const allowedToEdit = canEditEntry({
         role: membership.role,
         requesterId: ctx.session.user.id,
@@ -468,7 +452,7 @@ export const timeEntryRouter = createTRPCRouter({
         throw new TRPCError({ code: "NOT_FOUND", message: "Entry not found" });
       }
 
-      await getProjectMembershipOrThrow(ctx, entry.projectId);
+      await getClientMembershipForProject(ctx, entry.projectId);
 
       return ctx.db.timeEntryAudit.findMany({
         where: { timeEntryId: input.entryId },
@@ -494,17 +478,15 @@ export const timeEntryRouter = createTRPCRouter({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const membership = await getProjectMembershipOrThrow(ctx, input.projectId);
-      const isManager =
-        membership.role === "owner" || membership.role === "manager";
+      const membership = await getClientMembershipForProject(ctx, input.projectId);
+      const isOwner = membership.role === "owner";
 
       const entries = await ctx.db.timeEntry.findMany({
         where: {
           projectId: input.projectId,
           startAt: { gte: input.startDate },
           endAt: { lte: input.endDate },
-          // Members/viewers only see their own totals
-          ...(!isManager ? { userId: ctx.session.user.id } : {}),
+          ...(!isOwner ? { userId: ctx.session.user.id } : {}),
         },
         include: {
           user: {

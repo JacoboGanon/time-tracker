@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   BarChart3,
   Clock,
@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 
 import { api } from "~/trpc/react";
+import { useFilteredProjects } from "./client-filter-context";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
@@ -48,7 +49,7 @@ const ALL_VALUE = "__all__";
 
 export function ReportsView() {
   const utils = api.useUtils();
-  const projectsQuery = api.project.list.useQuery();
+  const { data: projects } = useFilteredProjects();
 
   const [startDate, setStartDate] = useState(
     new Date(Date.now() - 29 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
@@ -58,6 +59,14 @@ export function ReportsView() {
   );
   const [projectId, setProjectId] = useState(ALL_VALUE);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Reset project filter when selected project leaves the filtered list
+  useEffect(() => {
+    if (projectId === ALL_VALUE || !projects) return;
+    if (!projects.some((p) => p.id === projectId)) {
+      setProjectId(ALL_VALUE);
+    }
+  }, [projects, projectId]);
 
   const filters = useMemo(
     () => ({
@@ -205,7 +214,7 @@ export function ReportsView() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={ALL_VALUE}>All Projects</SelectItem>
-              {projectsQuery.data?.map((p) => (
+              {projects?.map((p) => (
                 <SelectItem key={p.id} value={p.id}>
                   {p.name}
                 </SelectItem>

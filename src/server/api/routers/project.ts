@@ -3,28 +3,30 @@ import { z } from "zod";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import {
-  assertCanManageMembership,
-  assertCanManageProject,
-  getProjectMembershipOrThrow,
-} from "~/server/api/utils/project-access";
-
-const projectRoleSchema = z.enum(["owner", "manager", "member", "viewer"]);
+  assertClientOwner,
+  getClientMembershipForProject,
+} from "~/server/api/utils/client-access";
 
 export const projectRouter = createTRPCRouter({
-  list: protectedProcedure.query(({ ctx }) => {
+  list: protectedProcedure.query(async ({ ctx }) => {
+    const clientIds = (
+      await ctx.db.clientMember.findMany({
+        where: { userId: ctx.session.user.id },
+        select: { clientId: true, role: true },
+      })
+    ).map((m) => m.clientId);
+
+    if (clientIds.length === 0) {
+      return [];
+    }
+
     return ctx.db.project.findMany({
       where: {
-        members: {
-          some: { userId: ctx.session.user.id },
-        },
+        clientId: { in: clientIds },
       },
       include: {
         client: {
           select: { id: true, name: true },
-        },
-        members: {
-          where: { userId: ctx.session.user.id },
-          select: { role: true },
         },
       },
       orderBy: [{ updatedAt: "desc" }, { name: "asc" }],
@@ -41,58 +43,19 @@ export const projectRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const client = await ctx.db.client.findUnique({
-        where: { id: input.clientId },
-        select: { id: true },
-      });
+      await assertClientOwner(ctx, input.clientId);
 
-      if (!client) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Client not found" });
-      }
+      const code = input.code?.trim();
+      const description = input.description?.trim();
 
-      return ctx.db.$transaction(async (tx) => {
-        const code = input.code?.trim();
-        const description = input.description?.trim();
-
-        const project = await tx.project.create({
-          data: {
-            clientId: input.clientId,
-            name: input.name.trim(),
-            code: code && code.length > 0 ? code : null,
-            description:
-              description && description.length > 0 ? description : null,
-          },
-        });
-
-        await tx.projectMember.create({
-          data: {
-            projectId: project.id,
-            userId: ctx.session.user.id,
-            role: "owner",
-          },
-        });
-
-        // Auto-add all client members to the new project
-        const clientMembers = await tx.clientMember.findMany({
-          where: {
-            clientId: input.clientId,
-            userId: { not: ctx.session.user.id },
-          },
-          select: { userId: true },
-        });
-
-        if (clientMembers.length > 0) {
-          await tx.projectMember.createMany({
-            data: clientMembers.map((cm) => ({
-              projectId: project.id,
-              userId: cm.userId,
-              role: "member" as const,
-            })),
-            skipDuplicates: true,
-          });
-        }
-
-        return project;
+      return ctx.db.project.create({
+        data: {
+          clientId: input.clientId,
+          name: input.name.trim(),
+          code: code && code.length > 0 ? code : null,
+          description:
+            description && description.length > 0 ? description : null,
+        },
       });
     }),
 
@@ -107,8 +70,14 @@ export const projectRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const membership = await getProjectMembershipOrThrow(ctx, input.projectId);
-      assertCanManageProject(membership.role);
+      const membership = await getClientMembershipForProject(ctx, input.projectId);
+
+      if (membership.role !== "owner") {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only client owners can manage projects",
+        });
+      }
 
       return ctx.db.project.update({
         where: { id: input.projectId },
@@ -120,81 +89,6 @@ export const projectRouter = createTRPCRouter({
               ? undefined
               : (input.description?.trim() ?? null),
           isActive: input.isActive,
-        },
-      });
-    }),
-
-  listMembers: protectedProcedure
-    .input(z.object({ projectId: z.string().min(1) }))
-    .query(async ({ ctx, input }) => {
-      await getProjectMembershipOrThrow(ctx, input.projectId);
-
-      return ctx.db.projectMember.findMany({
-        where: { projectId: input.projectId },
-        include: {
-          user: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-            },
-          },
-        },
-        orderBy: [{ role: "asc" }, { createdAt: "asc" }],
-      });
-    }),
-
-  addMember: protectedProcedure
-    .input(
-      z.object({
-        projectId: z.string().min(1),
-        userId: z.string().min(1),
-        role: projectRoleSchema,
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      const membership = await getProjectMembershipOrThrow(ctx, input.projectId);
-      assertCanManageMembership(membership.role);
-
-      return ctx.db.projectMember.upsert({
-        where: {
-          projectId_userId: {
-            projectId: input.projectId,
-            userId: input.userId,
-          },
-        },
-        update: {
-          role: input.role,
-        },
-        create: {
-          projectId: input.projectId,
-          userId: input.userId,
-          role: input.role,
-        },
-      });
-    }),
-
-  updateMemberRole: protectedProcedure
-    .input(
-      z.object({
-        projectId: z.string().min(1),
-        userId: z.string().min(1),
-        role: projectRoleSchema,
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      const membership = await getProjectMembershipOrThrow(ctx, input.projectId);
-      assertCanManageMembership(membership.role);
-
-      return ctx.db.projectMember.update({
-        where: {
-          projectId_userId: {
-            projectId: input.projectId,
-            userId: input.userId,
-          },
-        },
-        data: {
-          role: input.role,
         },
       });
     }),

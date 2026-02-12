@@ -1,10 +1,8 @@
+import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
-import {
-  assertCanManageProject,
-  getProjectMembershipOrThrow,
-} from "~/server/api/utils/project-access";
+import { getClientMembershipForProject } from "~/server/api/utils/client-access";
 
 export const rateRouter = createTRPCRouter({
   getMyDefaultRate: protectedProcedure.query(({ ctx }) => {
@@ -37,8 +35,14 @@ export const rateRouter = createTRPCRouter({
   getProjectOverrides: protectedProcedure
     .input(z.object({ projectId: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
-      const membership = await getProjectMembershipOrThrow(ctx, input.projectId);
-      assertCanManageProject(membership.role);
+      const membership = await getClientMembershipForProject(ctx, input.projectId);
+
+      if (membership.role !== "owner") {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only client owners can manage rate overrides",
+        });
+      }
 
       return ctx.db.projectRateOverride.findMany({
         where: { projectId: input.projectId },
@@ -64,8 +68,14 @@ export const rateRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const membership = await getProjectMembershipOrThrow(ctx, input.projectId);
-      assertCanManageProject(membership.role);
+      const membership = await getClientMembershipForProject(ctx, input.projectId);
+
+      if (membership.role !== "owner") {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only client owners can manage rate overrides",
+        });
+      }
 
       return ctx.db.projectRateOverride.upsert({
         where: {
@@ -95,8 +105,14 @@ export const rateRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const membership = await getProjectMembershipOrThrow(ctx, input.projectId);
-      assertCanManageProject(membership.role);
+      const membership = await getClientMembershipForProject(ctx, input.projectId);
+
+      if (membership.role !== "owner") {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only client owners can manage rate overrides",
+        });
+      }
 
       await ctx.db.projectRateOverride.delete({
         where: {
