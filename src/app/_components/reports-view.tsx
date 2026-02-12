@@ -13,6 +13,7 @@ import {
 
 import { api } from "~/trpc/react";
 import { useFilteredProjects } from "./client-filter-context";
+import { ReportsViewSkeleton } from "./view-skeletons";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
@@ -86,6 +87,10 @@ export function ReportsView() {
     },
     onError: (error) => setErrorMsg(error.message),
   });
+
+  if (summaryQuery.isLoading) {
+    return <ReportsViewSkeleton />;
+  }
 
   const exportPdf = async () => {
     try {

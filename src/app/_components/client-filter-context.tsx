@@ -7,6 +7,8 @@ import { api } from "~/trpc/react";
 type ClientFilterContextValue = {
   selectedClientId: string | null;
   setSelectedClientId: (id: string | null) => void;
+  selectedProjectId: string | null;
+  setSelectedProjectId: (id: string | null) => void;
 };
 
 const ClientFilterContext = createContext<ClientFilterContextValue | null>(null);
@@ -17,10 +19,18 @@ export function ClientFilterProvider({
   children: React.ReactNode;
 }) {
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
+    null,
+  );
 
   return (
     <ClientFilterContext.Provider
-      value={{ selectedClientId, setSelectedClientId }}
+      value={{
+        selectedClientId,
+        setSelectedClientId,
+        selectedProjectId,
+        setSelectedProjectId,
+      }}
     >
       {children}
     </ClientFilterContext.Provider>

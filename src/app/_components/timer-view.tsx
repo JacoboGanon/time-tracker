@@ -11,7 +11,8 @@ import {
 } from "lucide-react";
 
 import { api } from "~/trpc/react";
-import { useFilteredProjects } from "./client-filter-context";
+import { useClientFilter, useFilteredProjects } from "./client-filter-context";
+import { TimerViewSkeleton } from "./view-skeletons";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
@@ -51,9 +52,13 @@ const formatStopwatch = (milliseconds: number): string => {
 const formatHours = (minutes: number): string =>
   `${(minutes / 60).toFixed(1)}h`;
 
+const ALL_CLIENTS_VALUE = "__all__";
+
 export function TimerView() {
   const utils = api.useUtils();
-  const { data: projects } = useFilteredProjects();
+  const { selectedClientId, setSelectedClientId } = useClientFilter();
+  const { data: projects, isLoading: projectsLoading } = useFilteredProjects();
+  const clientsQuery = api.clients.list.useQuery();
   const activitiesQuery = api.activityType.list.useQuery();
 
   // Stopwatch state
@@ -171,6 +176,10 @@ export function TimerView() {
 
   const isRunning = Boolean(swStartedAt);
 
+  if (projectsLoading) {
+    return <TimerViewSkeleton />;
+  }
+
   return (
     <div className="space-y-6">
       {/* Page header */}
@@ -249,6 +258,31 @@ export function TimerView() {
 
             {/* Stopwatch config */}
             <div className="grid w-full max-w-2xl gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label className="text-xs text-muted-foreground">Client</Label>
+                <Select
+                  value={selectedClientId ?? ALL_CLIENTS_VALUE}
+                  onValueChange={(v) =>
+                    setSelectedClientId(
+                      v === ALL_CLIENTS_VALUE ? null : v,
+                    )
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="All Clients" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_CLIENTS_VALUE}>
+                      All Clients
+                    </SelectItem>
+                    {clientsQuery.data?.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="space-y-1.5">
                 <Label className="text-xs text-muted-foreground">Project</Label>
                 <Select value={swProjectId} onValueChange={setSwProjectId}>

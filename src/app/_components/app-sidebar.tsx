@@ -15,14 +15,7 @@ import {
 
 import { authClient } from "~/server/better-auth/client";
 import { api } from "~/trpc/react";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "~/components/ui/select";
-import { useClientFilter, useFilteredProjects } from "./client-filter-context";
+import { useClientFilter } from "./client-filter-context";
 import {
   Sidebar,
   SidebarContent,
@@ -55,12 +48,10 @@ interface AppSidebarProps {
   userName: string;
 }
 
-const ALL_CLIENTS_VALUE = "__all__";
-
 export function AppSidebar({ activeView, onNavigate, userName }: AppSidebarProps) {
   const clientsQuery = api.clients.list.useQuery();
-  const { data: filteredProjects } = useFilteredProjects();
-  const { selectedClientId, setSelectedClientId } = useClientFilter();
+  const projectsQuery = api.project.list.useQuery();
+  const { setSelectedProjectId } = useClientFilter();
   const [managingClientId, setManagingClientId] = useState<string | null>(null);
 
   const initials = userName
@@ -70,9 +61,10 @@ export function AppSidebar({ activeView, onNavigate, userName }: AppSidebarProps
     .toUpperCase()
     .slice(0, 2);
 
+  const allProjects = projectsQuery.data ?? [];
   const projectsByClient = (clientsQuery.data ?? []).map((client) => ({
     ...client,
-    projects: (filteredProjects ?? []).filter((p) => p.client.id === client.id),
+    projects: allProjects.filter((p) => p.client.id === client.id),
   }));
 
   return (
@@ -128,26 +120,6 @@ export function AppSidebar({ activeView, onNavigate, userName }: AppSidebarProps
             Projects
           </SidebarGroupLabel>
           <SidebarGroupContent>
-            <div className="mb-2 px-2 group-has-[[data-collapsible=icon]]/sidebar-wrapper:hidden">
-              <Select
-                value={selectedClientId ?? ALL_CLIENTS_VALUE}
-                onValueChange={(v) =>
-                  setSelectedClientId(v === ALL_CLIENTS_VALUE ? null : v)
-                }
-              >
-                <SelectTrigger className="h-7 text-xs">
-                  <SelectValue placeholder="All Clients" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL_CLIENTS_VALUE}>All Clients</SelectItem>
-                  {clientsQuery.data?.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
             <SidebarMenu>
               {projectsByClient.map((client) =>
                 client.projects.length > 0 ? (
@@ -169,7 +141,10 @@ export function AppSidebar({ activeView, onNavigate, userName }: AppSidebarProps
                       <SidebarMenuItem key={project.id}>
                         <SidebarMenuButton
                           className="text-xs"
-                          onClick={() => onNavigate("entries")}
+                          onClick={() => {
+                            setSelectedProjectId(project.id);
+                            onNavigate("entries");
+                          }}
                           tooltip={`${client.name} / ${project.name}`}
                         >
                           <LayoutDashboard className="size-3.5 text-muted-foreground/70" />
@@ -185,7 +160,7 @@ export function AppSidebar({ activeView, onNavigate, userName }: AppSidebarProps
                   </div>
                 ) : null,
               )}
-              {!filteredProjects?.length && (
+              {!allProjects.length && (
                 <p className="px-2 py-2 text-xs text-muted-foreground/50">
                   No projects yet
                 </p>
