@@ -224,6 +224,95 @@ export const timeEntryRouter = createTRPCRouter({
       });
     }),
 
+  infiniteList: protectedProcedure
+    .input(
+      listFiltersSchema.extend({
+        cursor: z.string().optional(),
+        limit: z.number().min(1).max(100).default(50),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const { cursor, limit, ...filters } = input;
+
+      const memberships = await ctx.db.clientMember.findMany({
+        where: { userId: ctx.session.user.id },
+        select: { clientId: true, role: true },
+      });
+
+      if (memberships.length === 0) {
+        return { items: [], nextCursor: undefined };
+      }
+
+      const allClientIds = memberships.map((m) => m.clientId);
+      const ownerClientIds = memberships
+        .filter((m) => m.role === "owner")
+        .map((m) => m.clientId);
+      const memberClientIds = memberships
+        .filter((m) => m.role === "member")
+        .map((m) => m.clientId);
+
+      const projectFilter = filters.projectId
+        ? { projectId: filters.projectId }
+        : {};
+
+      const orConditions: Record<string, unknown>[] = [];
+
+      if (ownerClientIds.length > 0) {
+        orConditions.push({
+          clientId: { in: ownerClientIds },
+          ...projectFilter,
+          ...(filters.memberId ? { userId: filters.memberId } : {}),
+        });
+      }
+      if (memberClientIds.length > 0) {
+        orConditions.push({
+          clientId: { in: memberClientIds },
+          ...projectFilter,
+          userId: ctx.session.user.id,
+        });
+      }
+
+      if (orConditions.length === 0) {
+        return { items: [], nextCursor: undefined };
+      }
+
+      const items = await ctx.db.timeEntry.findMany({
+        where: {
+          OR: orConditions,
+          startAt: filters.startDate ? { gte: filters.startDate } : undefined,
+          endAt: filters.endDate ? { lte: filters.endDate } : undefined,
+          activityTypeId: filters.activityTypeId,
+          clientId: filters.clientId
+            ? allClientIds.includes(filters.clientId)
+              ? filters.clientId
+              : undefined
+            : undefined,
+        },
+        include: {
+          project: {
+            select: { id: true, name: true },
+          },
+          user: {
+            select: { id: true, name: true, email: true },
+          },
+          activityType: {
+            select: { id: true, name: true },
+          },
+        },
+        orderBy: [{ startAt: "desc" }, { createdAt: "desc" }, { id: "desc" }],
+        take: limit + 1,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
+
+      let nextCursor: string | undefined = undefined;
+      if (items.length > limit) {
+        const nextItem = items.pop();
+        nextCursor = nextItem!.id;
+      }
+
+      return { items, nextCursor };
+    }),
+
   createManual: protectedProcedure
     .input(manualEntrySchema)
     .mutation(async ({ ctx, input }) => {

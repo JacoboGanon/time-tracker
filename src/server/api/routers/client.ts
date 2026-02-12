@@ -190,6 +190,47 @@ export const clientRouter = createTRPCRouter({
       });
     }),
 
+  updateMemberRole: protectedProcedure
+    .input(
+      z.object({
+        clientId: z.string().min(1),
+        userId: z.string().min(1),
+        role: z.enum(["owner", "member"]),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertClientOwner(ctx, input.clientId);
+
+      if (input.userId === ctx.session.user.id) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "You cannot change your own role",
+        });
+      }
+
+      if (input.role === "member") {
+        const ownerCount = await ctx.db.clientMember.count({
+          where: { clientId: input.clientId, role: "owner" },
+        });
+        if (ownerCount <= 1) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Cannot demote: this client must have at least one owner",
+          });
+        }
+      }
+
+      return ctx.db.clientMember.update({
+        where: {
+          clientId_userId: {
+            clientId: input.clientId,
+            userId: input.userId,
+          },
+        },
+        data: { role: input.role },
+      });
+    }),
+
   listAllUsers: protectedProcedure.query(async ({ ctx }) => {
     const ownedClient = await ctx.db.clientMember.findFirst({
       where: {

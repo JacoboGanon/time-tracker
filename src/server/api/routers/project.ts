@@ -92,4 +92,26 @@ export const projectRouter = createTRPCRouter({
         },
       });
     }),
+
+  delete: protectedProcedure
+    .input(z.object({ projectId: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const membership = await getClientMembershipForProject(
+        ctx,
+        input.projectId,
+      );
+
+      if (membership.role !== "owner") {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only client owners can delete projects",
+        });
+      }
+
+      await ctx.db.project.delete({
+        where: { id: input.projectId },
+      });
+
+      return { success: true };
+    }),
 });
