@@ -6,6 +6,7 @@ import {
   Check,
   Loader2,
   Pencil,
+  Plus,
   Trash2,
   X,
 } from "lucide-react";
@@ -19,10 +20,13 @@ import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { Badge } from "~/components/ui/badge";
+import { Textarea } from "~/components/ui/textarea";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "~/components/ui/select";
@@ -36,6 +40,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "~/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "~/components/ui/dialog";
 import { EntriesViewSkeleton } from "./view-skeletons";
 
 const toDateAtStartOfDay = (value: string): Date | undefined => {
@@ -62,6 +73,15 @@ type EditDraft = {
   startAt: string;
   endAt: string;
   activityTypeId: string;
+  description: string;
+  isBillable: boolean;
+};
+
+type CreateDraft = {
+  projectId: string;
+  activityTypeId: string;
+  startAt: string;
+  endAt: string;
   description: string;
   isBillable: boolean;
 };
@@ -107,6 +127,10 @@ export function EntriesView() {
     description: string;
   } | null>(null);
 
+  // Create dialog state
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createDraft, setCreateDraft] = useState<CreateDraft | null>(null);
+
   const listFilters = useMemo(
     () => ({
       startDate: toDateAtStartOfDay(filterStart),
@@ -146,6 +170,15 @@ export function EntriesView() {
     onError: (error) => setErrorMsg(error.message),
   });
 
+  const createEntry = api.timeEntry.createManual.useMutation({
+    onSuccess: async () => {
+      await utils.timeEntry.invalidate();
+      setCreateOpen(false);
+      setCreateDraft(null);
+    },
+    onError: (error) => setErrorMsg(error.message),
+  });
+
   const totalMinutes = allEntries.reduce(
     (sum, e) => sum + e.durationMinutes,
     0,
@@ -169,6 +202,33 @@ export function EntriesView() {
     }
     return Array.from(groups.entries());
   }, [allEntries]);
+
+  // Group projects by client for the create dialog
+  const projectsByClient = useMemo(() => {
+    const map = new Map<
+      string,
+      { clientName: string; projects: NonNullable<typeof projects> }
+    >();
+    for (const p of projects ?? []) {
+      if (!map.has(p.clientId)) {
+        map.set(p.clientId, { clientName: p.client.name, projects: [] });
+      }
+      map.get(p.clientId)!.projects.push(p);
+    }
+    return Array.from(map.values());
+  }, [projects]);
+
+  const openCreateDialog = () => {
+    setCreateDraft({
+      projectId: projects?.[0]?.id ?? "",
+      activityTypeId: activitiesQuery.data?.[0]?.id ?? "",
+      startAt: toDatetimeLocalValue(new Date(Date.now() - 60 * 60 * 1000)),
+      endAt: toDatetimeLocalValue(new Date()),
+      description: "",
+      isBillable: true,
+    });
+    setCreateOpen(true);
+  };
 
   if (entriesQuery.isLoading) {
     return <EntriesViewSkeleton />;
@@ -194,6 +254,14 @@ export function EntriesView() {
           >
             {formatHours(billableMinutes)} billable
           </Badge>
+          <Button
+            size="sm"
+            className="bg-teal-600 hover:bg-teal-500"
+            onClick={openCreateDialog}
+          >
+            <Plus className="mr-1.5 size-3.5" />
+            New Entry
+          </Button>
         </div>
       </div>
 
@@ -389,7 +457,11 @@ export function EntriesView() {
                             }}
                             disabled={updateEntry.isPending}
                           >
-                            <Check className="mr-1 size-3" />
+                            {updateEntry.isPending ? (
+                              <Loader2 className="mr-1 size-3 animate-spin" />
+                            ) : (
+                              <Check className="mr-1 size-3" />
+                            )}
                             Save
                           </Button>
                         </div>
@@ -500,6 +572,184 @@ export function EntriesView() {
           </Button>
         </div>
       )}
+
+      {/* Create entry dialog */}
+      <Dialog
+        open={createOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCreateOpen(false);
+            setCreateDraft(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>New Time Entry</DialogTitle>
+          </DialogHeader>
+          {createDraft && (
+            <div className="space-y-4 py-1">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium text-muted-foreground uppercase">
+                  Project
+                </Label>
+                <Select
+                  value={createDraft.projectId}
+                  onValueChange={(v) =>
+                    setCreateDraft((d) => (d ? { ...d, projectId: v } : null))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a project" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {projectsByClient.map((group) => (
+                      <SelectGroup key={group.clientName}>
+                        <SelectLabel>{group.clientName}</SelectLabel>
+                        {group.projects.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    ))}
+                    {(projects?.length ?? 0) === 0 && (
+                      <div className="px-2 py-4 text-center text-sm text-muted-foreground">
+                        No projects available
+                      </div>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium text-muted-foreground uppercase">
+                  Activity
+                </Label>
+                <Select
+                  value={createDraft.activityTypeId}
+                  onValueChange={(v) =>
+                    setCreateDraft((d) =>
+                      d ? { ...d, activityTypeId: v } : null,
+                    )
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select activity" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {activitiesQuery.data?.map((a) => (
+                      <SelectItem key={a.id} value={a.id}>
+                        {a.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-muted-foreground uppercase">
+                    Start
+                  </Label>
+                  <Input
+                    type="datetime-local"
+                    value={createDraft.startAt}
+                    onChange={(e) =>
+                      setCreateDraft((d) =>
+                        d ? { ...d, startAt: e.target.value } : null,
+                      )
+                    }
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-muted-foreground uppercase">
+                    End
+                  </Label>
+                  <Input
+                    type="datetime-local"
+                    value={createDraft.endAt}
+                    onChange={(e) =>
+                      setCreateDraft((d) =>
+                        d ? { ...d, endAt: e.target.value } : null,
+                      )
+                    }
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium text-muted-foreground uppercase">
+                  Description
+                </Label>
+                <Textarea
+                  value={createDraft.description}
+                  onChange={(e) =>
+                    setCreateDraft((d) =>
+                      d ? { ...d, description: e.target.value } : null,
+                    )
+                  }
+                  placeholder="What did you work on?"
+                  className="resize-none"
+                  rows={2}
+                />
+              </div>
+
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={createDraft.isBillable}
+                  onChange={(e) =>
+                    setCreateDraft((d) =>
+                      d ? { ...d, isBillable: e.target.checked } : null,
+                    )
+                  }
+                  className="size-3.5 accent-teal-500"
+                />
+                Billable
+              </label>
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setCreateOpen(false);
+                setCreateDraft(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              className="bg-teal-600 hover:bg-teal-500"
+              disabled={
+                createEntry.isPending ||
+                !createDraft?.projectId ||
+                !createDraft?.activityTypeId
+              }
+              onClick={() => {
+                if (!createDraft?.projectId || !createDraft.activityTypeId)
+                  return;
+                createEntry.mutate({
+                  projectId: createDraft.projectId,
+                  activityTypeId: createDraft.activityTypeId,
+                  startAt: new Date(createDraft.startAt),
+                  endAt: new Date(createDraft.endAt),
+                  description: createDraft.description,
+                  isBillable: createDraft.isBillable,
+                });
+              }}
+            >
+              {createEntry.isPending ? (
+                <Loader2 className="mr-2 size-3.5 animate-spin" />
+              ) : (
+                <Plus className="mr-1.5 size-3.5" />
+              )}
+              Save Entry
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete confirmation dialog */}
       <AlertDialog

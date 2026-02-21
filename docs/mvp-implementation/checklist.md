@@ -12,6 +12,6 @@
 - [x] Expand Prisma schema for time tracking domain
 - [x] Implement tRPC routers for clients/projects/activity types/time/rates/reports
 - [x] Replace template dashboard with core tracking + reporting UI
-- [x] Run tests and confirm pass
-- [x] Run lint and confirm pass
-- [x] Run type-check and confirm pass
+- [ ] Run tests and confirm pass
+- [ ] Run lint and confirm pass
+- [ ] Run type-check and confirm pass
