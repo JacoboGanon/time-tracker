@@ -8,7 +8,7 @@ import { Separator } from "~/components/ui/separator";
 import { ErrorBoundary } from "~/components/error-boundary";
 
 import { AppSidebar, type ViewId } from "./app-sidebar";
-import { ClientFilterProvider } from "./client-filter-context";
+import { ProjectFilterProvider } from "./client-filter-context";
 import { TimerView } from "./timer-view";
 import { EntriesView } from "./entries-view";
 import { ReportsView } from "./reports-view";
@@ -37,7 +37,7 @@ export function TimeTrackerDashboard({ userName }: TimeTrackerDashboardProps) {
   const ActiveComponent = VIEW_COMPONENTS[activeView];
 
   return (
-    <ClientFilterProvider>
+    <ProjectFilterProvider>
       <SidebarProvider>
         <AppSidebar
           activeView={activeView}
@@ -59,6 +59,6 @@ export function TimeTrackerDashboard({ userName }: TimeTrackerDashboardProps) {
           </main>
         </SidebarInset>
       </SidebarProvider>
-    </ClientFilterProvider>
+    </ProjectFilterProvider>
   );
 }
