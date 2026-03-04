@@ -1,23 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import {
-  CircleDot,
-  Clock,
-  Play,
-  Plus,
-  Square,
-  Zap,
-} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { CircleDot, Clock, Play, Plus, Square } from "lucide-react";
 
 import { api } from "~/trpc/react";
-import { useClientFilter, useFilteredProjects } from "./client-filter-context";
+import { useProjectFilter } from "./client-filter-context";
 import { TimerViewSkeleton } from "./view-skeletons";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
+import { DateTimePicker } from "~/components/ui/date-time-picker";
 import { Textarea } from "~/components/ui/textarea";
-import { Badge } from "~/components/ui/badge";
 import { Card, CardContent } from "~/components/ui/card";
 import {
   Select,
@@ -52,14 +45,19 @@ const formatStopwatch = (milliseconds: number): string => {
 const formatHours = (minutes: number): string =>
   `${(minutes / 60).toFixed(1)}h`;
 
-const ALL_CLIENTS_VALUE = "__all__";
-
 export function TimerView() {
   const utils = api.useUtils();
-  const { selectedClientId, setSelectedClientId } = useClientFilter();
-  const { data: projects, isLoading: projectsLoading } = useFilteredProjects();
-  const clientsQuery = api.clients.list.useQuery();
+  const {
+    selectedProjectId: globalProjectId,
+    clientProjects,
+  } = useProjectFilter();
+
+  const { data: allProjects, isLoading: projectsLoading } =
+    api.project.list.useQuery();
   const activitiesQuery = api.activityType.list.useQuery();
+
+  const projectsForSelector = clientProjects;
+  const isProjectLocked = !!globalProjectId;
 
   // Stopwatch state
   const [swProjectId, setSwProjectId] = useState("");
@@ -75,24 +73,26 @@ export function TimerView() {
   const [meActivityId, setMeActivityId] = useState("");
   const [meDescription, setMeDescription] = useState("");
   const [meBillable, setMeBillable] = useState(true);
-  const [meStart, setMeStart] = useState(
-    toDatetimeLocalValue(new Date(Date.now() - 60 * 60 * 1000)),
-  );
-  const [meEnd, setMeEnd] = useState(toDatetimeLocalValue(new Date()));
+  const [meStart, setMeStart] = useState("");
+  const [meEnd, setMeEnd] = useState("");
 
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Auto-select first project/activity + reset when filtered out
+  // Sync stopwatch project with global selection (only when not running)
   useEffect(() => {
-    if (!projects?.length) return;
-    const ids = new Set(projects.map((p) => p.id));
-    if (!swProjectId || (!ids.has(swProjectId) && !swStartedAt)) {
-      setSwProjectId(projects[0]!.id);
+    if (globalProjectId) {
+      if (!swStartedAt) setSwProjectId(globalProjectId);
+      setMeProjectId(globalProjectId);
+    } else if (projectsForSelector.length > 0) {
+      const ids = new Set(projectsForSelector.map((p) => p.id));
+      if (!swProjectId || (!ids.has(swProjectId) && !swStartedAt)) {
+        setSwProjectId(projectsForSelector[0]!.id);
+      }
+      if (!meProjectId || !ids.has(meProjectId)) {
+        setMeProjectId(projectsForSelector[0]!.id);
+      }
     }
-    if (!meProjectId || !ids.has(meProjectId)) {
-      setMeProjectId(projects[0]!.id);
-    }
-  }, [projects, swProjectId, meProjectId, swStartedAt]);
+  }, [globalProjectId, projectsForSelector, swProjectId, meProjectId, swStartedAt]);
 
   useEffect(() => {
     if (activitiesQuery.data?.length) {
@@ -114,7 +114,7 @@ export function TimerView() {
     return () => window.clearInterval(id);
   }, [swStartedAt]);
 
-  // Today's entries
+  // Today's tracked time
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
   const todayEnd = new Date();
@@ -174,7 +174,23 @@ export function TimerView() {
     });
   };
 
+  const handleManualDialogOpen = (open: boolean) => {
+    if (open) {
+      setMeStart(toDatetimeLocalValue(new Date(Date.now() - 60 * 60 * 1000)));
+      setMeEnd(toDatetimeLocalValue(new Date()));
+      setMeDescription("");
+      setMeBillable(true);
+    }
+    setManualOpen(open);
+  };
+
   const isRunning = Boolean(swStartedAt);
+
+  // Find selected project name for locked display
+  const lockedProjectName = useMemo(() => {
+    if (!globalProjectId) return null;
+    return allProjects?.find((p) => p.id === globalProjectId)?.name ?? null;
+  }, [globalProjectId, allProjects]);
 
   if (projectsLoading) {
     return <TimerViewSkeleton />;
@@ -183,12 +199,7 @@ export function TimerView() {
   return (
     <div className="space-y-6">
       {/* Page header */}
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Timer</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Track your time with the stopwatch or add entries manually.
-        </p>
-      </div>
+      <h1 className="text-2xl font-semibold tracking-tight">Timer</h1>
 
       {errorMsg && (
         <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
@@ -258,45 +269,31 @@ export function TimerView() {
 
             {/* Stopwatch config */}
             <div className="grid w-full max-w-2xl gap-4 sm:grid-cols-2">
-              <div className="space-y-1.5 sm:col-span-2">
-                <Label className="text-xs text-muted-foreground">Client</Label>
-                <Select
-                  value={selectedClientId ?? ALL_CLIENTS_VALUE}
-                  onValueChange={(v) =>
-                    setSelectedClientId(
-                      v === ALL_CLIENTS_VALUE ? null : v,
-                    )
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="All Clients" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={ALL_CLIENTS_VALUE}>
-                      All Clients
-                    </SelectItem>
-                    {clientsQuery.data?.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
               <div className="space-y-1.5">
                 <Label className="text-xs text-muted-foreground">Project</Label>
-                <Select value={swProjectId} onValueChange={setSwProjectId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select project" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {projects?.map((p) => (
-                      <SelectItem key={p.id} value={p.id}>
-                        {p.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {isProjectLocked ? (
+                  <div className="flex h-9 items-center rounded-md border border-input bg-muted/50 px-3 text-sm">
+                    {lockedProjectName ?? "—"}
+                  </div>
+                ) : (
+                  <Select value={swProjectId} onValueChange={setSwProjectId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select project" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {projectsForSelector.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.name}
+                        </SelectItem>
+                      ))}
+                      {projectsForSelector.length === 0 && (
+                        <div className="px-2 py-4 text-center text-sm text-muted-foreground">
+                          No projects available
+                        </div>
+                      )}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs text-muted-foreground">
@@ -342,7 +339,7 @@ export function TimerView() {
       </Card>
 
       {/* Quick stats + manual entry */}
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2">
         <Card className="border-sidebar-border bg-sidebar">
           <CardContent className="pt-5">
             <div className="flex items-center gap-3">
@@ -359,25 +356,7 @@ export function TimerView() {
           </CardContent>
         </Card>
 
-        <Card className="border-sidebar-border bg-sidebar">
-          <CardContent className="pt-5">
-            <div className="flex items-center gap-3">
-              <div className="flex size-9 items-center justify-center rounded-lg bg-amber-500/10">
-                <Zap className="size-4 text-amber-400" />
-              </div>
-              <div>
-                <p className="text-2xl font-semibold tracking-tight">
-                  {todayEntriesQuery.data?.length ?? 0}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Entries today
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Dialog open={manualOpen} onOpenChange={setManualOpen}>
+        <Dialog open={manualOpen} onOpenChange={handleManualDialogOpen}>
           <DialogTrigger asChild>
             <Card className="group cursor-pointer border-dashed border-sidebar-border bg-sidebar transition-colors hover:border-teal-400/40 hover:bg-sidebar-accent">
               <CardContent className="flex h-full items-center justify-center pt-5">
@@ -396,18 +375,24 @@ export function TimerView() {
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label className="text-xs">Project</Label>
-                  <Select value={meProjectId} onValueChange={setMeProjectId}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select project" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {projects?.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          {p.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  {isProjectLocked ? (
+                    <div className="flex h-9 items-center rounded-md border border-input bg-muted/50 px-3 text-sm">
+                      {lockedProjectName ?? "—"}
+                    </div>
+                  ) : (
+                    <Select value={meProjectId} onValueChange={setMeProjectId}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select project" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {projectsForSelector.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs">Activity</Label>
@@ -428,18 +413,16 @@ export function TimerView() {
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label className="text-xs">Start</Label>
-                  <Input
-                    type="datetime-local"
+                  <DateTimePicker
                     value={meStart}
-                    onChange={(e) => setMeStart(e.target.value)}
+                    onChange={setMeStart}
                   />
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs">End</Label>
-                  <Input
-                    type="datetime-local"
+                  <DateTimePicker
                     value={meEnd}
-                    onChange={(e) => setMeEnd(e.target.value)}
+                    onChange={setMeEnd}
                   />
                 </div>
               </div>
@@ -480,61 +463,6 @@ export function TimerView() {
             </div>
           </DialogContent>
         </Dialog>
-      </div>
-
-      {/* Today's entries */}
-      <div>
-        <h2 className="mb-3 text-sm font-semibold text-muted-foreground">
-          Today&apos;s Entries
-        </h2>
-        <div className="space-y-2">
-          {todayEntriesQuery.data?.map((entry) => (
-            <div
-              key={entry.id}
-              className="flex items-center justify-between rounded-lg border border-sidebar-border bg-sidebar px-4 py-3"
-            >
-              <div className="flex items-center gap-3">
-                <div
-                  className={`size-2 rounded-full ${entry.isBillable ? "bg-teal-400" : "bg-muted-foreground/30"}`}
-                />
-                <div>
-                  <p className="text-sm font-medium">
-                    {entry.project.name}
-                    <span className="ml-1.5 text-muted-foreground">
-                      &middot; {entry.activityType.name}
-                    </span>
-                  </p>
-                  {entry.description && (
-                    <p className="text-xs text-muted-foreground">
-                      {entry.description}
-                    </p>
-                  )}
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">
-                  {new Date(entry.startAt).toLocaleTimeString([], {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}{" "}
-                  &ndash;{" "}
-                  {new Date(entry.endAt).toLocaleTimeString([], {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                </span>
-                <Badge variant="secondary" className="font-mono text-xs">
-                  {formatHours(entry.durationMinutes)}
-                </Badge>
-              </div>
-            </div>
-          ))}
-          {!todayEntriesQuery.data?.length && (
-            <p className="py-8 text-center text-sm text-muted-foreground/50">
-              No entries today. Start the timer or add a manual entry.
-            </p>
-          )}
-        </div>
       </div>
     </div>
   );

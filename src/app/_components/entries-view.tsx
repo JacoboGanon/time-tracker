@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   CalendarDays,
   Check,
@@ -12,21 +12,18 @@ import {
 } from "lucide-react";
 
 import { api } from "~/trpc/react";
-import {
-  useClientFilter,
-  useFilteredProjects,
-} from "./client-filter-context";
+import { useProjectFilter } from "./client-filter-context";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
+import { DatePicker } from "~/components/ui/date-picker";
+import { DateTimePicker } from "~/components/ui/date-time-picker";
 import { Badge } from "~/components/ui/badge";
 import { Textarea } from "~/components/ui/textarea";
 import {
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "~/components/ui/select";
@@ -90,8 +87,10 @@ const ALL_VALUE = "__all__";
 
 export function EntriesView() {
   const utils = api.useUtils();
-  const { data: projects } = useFilteredProjects();
-  const { selectedProjectId, setSelectedProjectId } = useClientFilter();
+  const {
+    selectedProjectId: globalProjectId,
+    clientProjects,
+  } = useProjectFilter();
   const activitiesQuery = api.activityType.list.useQuery();
 
   const [filterStart, setFilterStart] = useState(
@@ -100,24 +99,7 @@ export function EntriesView() {
   const [filterEnd, setFilterEnd] = useState(
     new Date().toISOString().slice(0, 10),
   );
-  const [filterProject, setFilterProject] = useState(ALL_VALUE);
   const [filterActivity, setFilterActivity] = useState(ALL_VALUE);
-
-  // One-shot: navigate from sidebar project click
-  useEffect(() => {
-    if (selectedProjectId) {
-      setFilterProject(selectedProjectId);
-      setSelectedProjectId(null);
-    }
-  }, [selectedProjectId, setSelectedProjectId]);
-
-  // Reset project filter when selected project leaves the filtered list
-  useEffect(() => {
-    if (filterProject === ALL_VALUE || !projects) return;
-    if (!projects.some((p) => p.id === filterProject)) {
-      setFilterProject(ALL_VALUE);
-    }
-  }, [projects, filterProject]);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
@@ -131,14 +113,17 @@ export function EntriesView() {
   const [createOpen, setCreateOpen] = useState(false);
   const [createDraft, setCreateDraft] = useState<CreateDraft | null>(null);
 
+  // Use global project filter; if no specific project, pass undefined (all client projects show)
+  const effectiveProjectId = globalProjectId ?? undefined;
+
   const listFilters = useMemo(
     () => ({
       startDate: toDateAtStartOfDay(filterStart),
       endDate: toDateAtEndOfDay(filterEnd),
-      projectId: filterProject === ALL_VALUE ? undefined : filterProject,
+      projectId: effectiveProjectId,
       activityTypeId: filterActivity === ALL_VALUE ? undefined : filterActivity,
     }),
-    [filterStart, filterEnd, filterProject, filterActivity],
+    [filterStart, filterEnd, effectiveProjectId, filterActivity],
   );
 
   const entriesQuery = api.timeEntry.infiniteList.useInfiniteQuery(
@@ -152,6 +137,14 @@ export function EntriesView() {
     () => entriesQuery.data?.pages.flatMap((p) => p.items) ?? [],
     [entriesQuery.data],
   );
+
+  // When no specific project is selected, filter entries client-side to only show entries from the selected client's projects
+  const filteredEntries = useMemo(() => {
+    if (globalProjectId) return allEntries;
+    const clientProjectIds = new Set(clientProjects.map((p) => p.id));
+    if (clientProjectIds.size === 0) return allEntries;
+    return allEntries.filter((e) => clientProjectIds.has(e.project.id));
+  }, [allEntries, globalProjectId, clientProjects]);
 
   const updateEntry = api.timeEntry.update.useMutation({
     onSuccess: async () => {
@@ -179,19 +172,19 @@ export function EntriesView() {
     onError: (error) => setErrorMsg(error.message),
   });
 
-  const totalMinutes = allEntries.reduce(
+  const totalMinutes = filteredEntries.reduce(
     (sum, e) => sum + e.durationMinutes,
     0,
   );
-  const billableMinutes = allEntries.reduce(
+  const billableMinutes = filteredEntries.reduce(
     (sum, e) => sum + (e.isBillable ? e.durationMinutes : 0),
     0,
   );
 
   // Group entries by date
   const groupedEntries = useMemo(() => {
-    const groups = new Map<string, typeof allEntries>();
-    for (const entry of allEntries) {
+    const groups = new Map<string, typeof filteredEntries>();
+    for (const entry of filteredEntries) {
       const dateKey = new Date(entry.startAt).toLocaleDateString("en-US", {
         weekday: "short",
         month: "short",
@@ -201,26 +194,11 @@ export function EntriesView() {
       groups.get(dateKey)!.push(entry);
     }
     return Array.from(groups.entries());
-  }, [allEntries]);
-
-  // Group projects by client for the create dialog
-  const projectsByClient = useMemo(() => {
-    const map = new Map<
-      string,
-      { clientName: string; projects: NonNullable<typeof projects> }
-    >();
-    for (const p of projects ?? []) {
-      if (!map.has(p.clientId)) {
-        map.set(p.clientId, { clientName: p.client.name, projects: [] });
-      }
-      map.get(p.clientId)!.projects.push(p);
-    }
-    return Array.from(map.values());
-  }, [projects]);
+  }, [filteredEntries]);
 
   const openCreateDialog = () => {
     setCreateDraft({
-      projectId: projects?.[0]?.id ?? "",
+      projectId: globalProjectId ?? clientProjects[0]?.id ?? "",
       activityTypeId: activitiesQuery.data?.[0]?.id ?? "",
       startAt: toDatetimeLocalValue(new Date(Date.now() - 60 * 60 * 1000)),
       endAt: toDatetimeLocalValue(new Date()),
@@ -238,12 +216,7 @@ export function EntriesView() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Entries</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            View and manage all your time entries.
-          </p>
-        </div>
+        <h1 className="text-2xl font-semibold tracking-tight">Entries</h1>
         <div className="flex items-center gap-3">
           <Badge variant="outline" className="font-mono text-xs">
             {formatHours(totalMinutes)} total
@@ -278,46 +251,54 @@ export function EntriesView() {
       )}
 
       {/* Filters */}
-      <div className="flex flex-wrap items-end gap-3 rounded-lg border border-sidebar-border bg-sidebar p-4">
+      <div className="space-y-3 rounded-lg border border-sidebar-border bg-sidebar p-4">
+        <div className="flex flex-wrap gap-1.5">
+          {[
+            { label: "Today", start: 0, end: 0 },
+            { label: "This Week", start: new Date().getDay() || 7, end: 0 },
+            { label: "This Month", start: new Date().getDate() - 1, end: 0 },
+            { label: "Last 30 Days", start: 29, end: 0 },
+          ].map((preset) => {
+            const presetStart = new Date(
+              Date.now() - preset.start * 24 * 60 * 60 * 1000,
+            )
+              .toISOString()
+              .slice(0, 10);
+            const presetEnd = new Date(
+              Date.now() - preset.end * 24 * 60 * 60 * 1000,
+            )
+              .toISOString()
+              .slice(0, 10);
+            const isActive =
+              filterStart === presetStart && filterEnd === presetEnd;
+            return (
+              <Button
+                key={preset.label}
+                size="sm"
+                variant={isActive ? "secondary" : "ghost"}
+                className="h-7 text-xs"
+                onClick={() => {
+                  setFilterStart(presetStart);
+                  setFilterEnd(presetEnd);
+                }}
+              >
+                {preset.label}
+              </Button>
+            );
+          })}
+        </div>
+        <div className="flex flex-wrap items-end gap-3">
         <div className="space-y-1">
           <Label className="text-[10px] font-medium text-muted-foreground uppercase">
             From
           </Label>
-          <Input
-            type="date"
-            className="h-9 w-[150px]"
-            value={filterStart}
-            onChange={(e) => setFilterStart(e.target.value)}
-          />
+          <DatePicker value={filterStart} onChange={setFilterStart} />
         </div>
         <div className="space-y-1">
           <Label className="text-[10px] font-medium text-muted-foreground uppercase">
             To
           </Label>
-          <Input
-            type="date"
-            className="h-9 w-[150px]"
-            value={filterEnd}
-            onChange={(e) => setFilterEnd(e.target.value)}
-          />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-[10px] font-medium text-muted-foreground uppercase">
-            Project
-          </Label>
-          <Select value={filterProject} onValueChange={setFilterProject}>
-            <SelectTrigger className="h-9 w-[180px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_VALUE}>All Projects</SelectItem>
-              {projects?.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <DatePicker value={filterEnd} onChange={setFilterEnd} />
         </div>
         <div className="space-y-1">
           <Label className="text-[10px] font-medium text-muted-foreground uppercase">
@@ -336,6 +317,7 @@ export function EntriesView() {
               ))}
             </SelectContent>
           </Select>
+        </div>
         </div>
       </div>
 
@@ -364,21 +346,19 @@ export function EntriesView() {
                   {editingId === entry.id && editDraft ? (
                     <div className="space-y-3">
                       <div className="grid gap-3 sm:grid-cols-2">
-                        <Input
-                          type="datetime-local"
+                        <DateTimePicker
                           value={editDraft.startAt}
-                          onChange={(e) =>
+                          onChange={(v) =>
                             setEditDraft((d) =>
-                              d ? { ...d, startAt: e.target.value } : null,
+                              d ? { ...d, startAt: v } : null,
                             )
                           }
                         />
-                        <Input
-                          type="datetime-local"
+                        <DateTimePicker
                           value={editDraft.endAt}
-                          onChange={(e) =>
+                          onChange={(v) =>
                             setEditDraft((d) =>
-                              d ? { ...d, endAt: e.target.value } : null,
+                              d ? { ...d, endAt: v } : null,
                             )
                           }
                         />
@@ -505,7 +485,7 @@ export function EntriesView() {
                         >
                           {formatHours(entry.durationMinutes)}
                         </Badge>
-                        <div className="flex opacity-0 transition-opacity group-hover:opacity-100">
+                        <div className="flex sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100">
                           <Button
                             size="icon"
                             variant="ghost"
@@ -549,7 +529,7 @@ export function EntriesView() {
             </div>
           </div>
         ))}
-        {allEntries.length === 0 && !entriesQuery.isLoading && (
+        {filteredEntries.length === 0 && !entriesQuery.isLoading && (
           <p className="py-12 text-center text-sm text-muted-foreground/50">
             No entries for the selected filters.
           </p>
@@ -593,33 +573,34 @@ export function EntriesView() {
                 <Label className="text-xs font-medium text-muted-foreground uppercase">
                   Project
                 </Label>
-                <Select
-                  value={createDraft.projectId}
-                  onValueChange={(v) =>
-                    setCreateDraft((d) => (d ? { ...d, projectId: v } : null))
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a project" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {projectsByClient.map((group) => (
-                      <SelectGroup key={group.clientName}>
-                        <SelectLabel>{group.clientName}</SelectLabel>
-                        {group.projects.map((p) => (
-                          <SelectItem key={p.id} value={p.id}>
-                            {p.name}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    ))}
-                    {(projects?.length ?? 0) === 0 && (
-                      <div className="px-2 py-4 text-center text-sm text-muted-foreground">
-                        No projects available
-                      </div>
-                    )}
-                  </SelectContent>
-                </Select>
+                {globalProjectId ? (
+                  <div className="flex h-9 items-center rounded-md border border-input bg-muted/50 px-3 text-sm">
+                    {clientProjects.find((p) => p.id === globalProjectId)?.name ?? "—"}
+                  </div>
+                ) : (
+                  <Select
+                    value={createDraft.projectId}
+                    onValueChange={(v) =>
+                      setCreateDraft((d) => (d ? { ...d, projectId: v } : null))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a project" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {clientProjects.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.name}
+                        </SelectItem>
+                      ))}
+                      {clientProjects.length === 0 && (
+                        <div className="px-2 py-4 text-center text-sm text-muted-foreground">
+                          No projects available
+                        </div>
+                      )}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
 
               <div className="space-y-1.5">
@@ -652,26 +633,33 @@ export function EntriesView() {
                   <Label className="text-xs font-medium text-muted-foreground uppercase">
                     Start
                   </Label>
-                  <Input
-                    type="datetime-local"
+                  <DateTimePicker
                     value={createDraft.startAt}
-                    onChange={(e) =>
-                      setCreateDraft((d) =>
-                        d ? { ...d, startAt: e.target.value } : null,
-                      )
-                    }
+                    onChange={(newStart) => {
+                      setCreateDraft((d) => {
+                        if (!d) return null;
+                        const startDate = new Date(newStart);
+                        const endDate = new Date(
+                          startDate.getTime() + 60 * 60 * 1000,
+                        );
+                        return {
+                          ...d,
+                          startAt: newStart,
+                          endAt: toDatetimeLocalValue(endDate),
+                        };
+                      });
+                    }}
                   />
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs font-medium text-muted-foreground uppercase">
                     End
                   </Label>
-                  <Input
-                    type="datetime-local"
+                  <DateTimePicker
                     value={createDraft.endAt}
-                    onChange={(e) =>
+                    onChange={(v) =>
                       setCreateDraft((d) =>
-                        d ? { ...d, endAt: e.target.value } : null,
+                        d ? { ...d, endAt: v } : null,
                       )
                     }
                   />

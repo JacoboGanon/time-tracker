@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   BarChart3,
   Clock,
@@ -12,20 +12,13 @@ import {
 } from "lucide-react";
 
 import { api } from "~/trpc/react";
-import { useFilteredProjects } from "./client-filter-context";
+import { useProjectFilter } from "./client-filter-context";
 import { ReportsViewSkeleton } from "./view-skeletons";
 import { Button } from "~/components/ui/button";
-import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
+import { DatePicker } from "~/components/ui/date-picker";
 import { Badge } from "~/components/ui/badge";
 import { Card, CardContent } from "~/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "~/components/ui/select";
 
 const toDateAtStartOfDay = (value: string): Date | undefined => {
   if (!value) return undefined;
@@ -46,11 +39,9 @@ const toCurrency = (amountCents: number): string =>
 const formatHours = (minutes: number): string =>
   `${(minutes / 60).toFixed(1)}h`;
 
-const ALL_VALUE = "__all__";
-
 export function ReportsView() {
   const utils = api.useUtils();
-  const { data: projects } = useFilteredProjects();
+  const { selectedProjectId: globalProjectId } = useProjectFilter();
 
   const [startDate, setStartDate] = useState(
     new Date(Date.now() - 29 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
@@ -58,24 +49,15 @@ export function ReportsView() {
   const [endDate, setEndDate] = useState(
     new Date().toISOString().slice(0, 10),
   );
-  const [projectId, setProjectId] = useState(ALL_VALUE);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-  // Reset project filter when selected project leaves the filtered list
-  useEffect(() => {
-    if (projectId === ALL_VALUE || !projects) return;
-    if (!projects.some((p) => p.id === projectId)) {
-      setProjectId(ALL_VALUE);
-    }
-  }, [projects, projectId]);
 
   const filters = useMemo(
     () => ({
       startDate: toDateAtStartOfDay(startDate) ?? new Date(),
       endDate: toDateAtEndOfDay(endDate) ?? new Date(),
-      projectId: projectId === ALL_VALUE ? undefined : projectId,
+      projectId: globalProjectId ?? undefined,
     }),
-    [startDate, endDate, projectId],
+    [startDate, endDate, globalProjectId],
   );
 
   const summaryQuery = api.report.summary.useQuery(filters);
@@ -145,12 +127,7 @@ export function ReportsView() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Reports</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Analyze your time data and generate client-ready reports.
-          </p>
-        </div>
+        <h1 className="text-2xl font-semibold tracking-tight">Reports</h1>
         <div className="flex gap-2">
           <Button
             variant="outline"
@@ -186,46 +163,55 @@ export function ReportsView() {
       )}
 
       {/* Filters */}
-      <div className="flex flex-wrap items-end gap-3 rounded-lg border border-sidebar-border bg-sidebar p-4">
-        <div className="space-y-1">
-          <Label className="text-[10px] font-medium text-muted-foreground uppercase">
-            From
-          </Label>
-          <Input
-            type="date"
-            className="h-9 w-[150px]"
-            value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
-          />
+      <div className="space-y-3 rounded-lg border border-sidebar-border bg-sidebar p-4">
+        <div className="flex flex-wrap gap-1.5">
+          {[
+            { label: "Today", start: 0, end: 0 },
+            { label: "This Week", start: new Date().getDay() || 7, end: 0 },
+            { label: "This Month", start: new Date().getDate() - 1, end: 0 },
+            { label: "Last 30 Days", start: 29, end: 0 },
+          ].map((preset) => {
+            const presetStart = new Date(
+              Date.now() - preset.start * 24 * 60 * 60 * 1000,
+            )
+              .toISOString()
+              .slice(0, 10);
+            const presetEnd = new Date(
+              Date.now() - preset.end * 24 * 60 * 60 * 1000,
+            )
+              .toISOString()
+              .slice(0, 10);
+            const isActive =
+              startDate === presetStart && endDate === presetEnd;
+            return (
+              <Button
+                key={preset.label}
+                size="sm"
+                variant={isActive ? "secondary" : "ghost"}
+                className="h-7 text-xs"
+                onClick={() => {
+                  setStartDate(presetStart);
+                  setEndDate(presetEnd);
+                }}
+              >
+                {preset.label}
+              </Button>
+            );
+          })}
         </div>
-        <div className="space-y-1">
-          <Label className="text-[10px] font-medium text-muted-foreground uppercase">
-            To
-          </Label>
-          <Input
-            type="date"
-            className="h-9 w-[150px]"
-            value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
-          />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-[10px] font-medium text-muted-foreground uppercase">
-            Project
-          </Label>
-          <Select value={projectId} onValueChange={setProjectId}>
-            <SelectTrigger className="h-9 w-[200px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_VALUE}>All Projects</SelectItem>
-              {projects?.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="space-y-1">
+            <Label className="text-[10px] font-medium text-muted-foreground uppercase">
+              From
+            </Label>
+            <DatePicker value={startDate} onChange={setStartDate} />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-[10px] font-medium text-muted-foreground uppercase">
+              To
+            </Label>
+            <DatePicker value={endDate} onChange={setEndDate} />
+          </div>
         </div>
       </div>
 
