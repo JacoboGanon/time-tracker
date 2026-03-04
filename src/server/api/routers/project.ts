@@ -20,7 +20,7 @@ export const projectRouter = createTRPCRouter({
       return [];
     }
 
-    return ctx.db.project.findMany({
+    const projects = await ctx.db.project.findMany({
       where: {
         clientId: { in: clientIds },
       },
@@ -28,9 +28,25 @@ export const projectRouter = createTRPCRouter({
         client: {
           select: { id: true, name: true },
         },
+        timeEntries: {
+          where: { userId: ctx.session.user.id },
+          orderBy: { startAt: "desc" },
+          take: 1,
+          select: { startAt: true },
+        },
       },
-      orderBy: [{ updatedAt: "desc" }, { name: "asc" }],
     });
+
+    // Sort by most recent time entry (projects you've worked on recently first),
+    // then alphabetically for projects with no entries
+    return projects
+      .sort((a, b) => {
+        const aTime = a.timeEntries[0]?.startAt?.getTime() ?? 0;
+        const bTime = b.timeEntries[0]?.startAt?.getTime() ?? 0;
+        if (bTime !== aTime) return bTime - aTime;
+        return a.name.localeCompare(b.name);
+      })
+      .map(({ timeEntries: _, ...project }) => project);
   }),
 
   create: protectedProcedure
