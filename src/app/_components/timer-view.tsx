@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { CircleDot, Clock, Play, Plus, Square } from "lucide-react";
 
 import { api } from "~/trpc/react";
+import { useShortcut } from "~/hooks/use-keyboard-shortcuts";
 import { useProjectFilter } from "./client-filter-context";
 import { TimerViewSkeleton } from "./view-skeletons";
 import { Button } from "~/components/ui/button";
@@ -45,6 +46,38 @@ const formatStopwatch = (milliseconds: number): string => {
 const formatHours = (minutes: number): string =>
   `${(minutes / 60).toFixed(1)}h`;
 
+const STORAGE_KEY = "time-tracker:stopwatch";
+
+interface StoredStopwatch {
+  startedAt: string;
+  projectId: string;
+  activityId: string;
+  description: string;
+  billable: boolean;
+}
+
+function saveStopwatch(state: StoredStopwatch) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch {}
+}
+
+function loadStopwatch(): StoredStopwatch | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as StoredStopwatch;
+  } catch {
+    return null;
+  }
+}
+
+function clearStopwatch() {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {}
+}
+
 export function TimerView() {
   const utils = api.useUtils();
   const {
@@ -78,6 +111,23 @@ export function TimerView() {
 
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  // Restore stopwatch from localStorage on mount
+  useEffect(() => {
+    const stored = loadStopwatch();
+    if (stored) {
+      const startDate = new Date(stored.startedAt);
+      if (!isNaN(startDate.getTime())) {
+        setSwStartedAt(startDate);
+        setSwProjectId(stored.projectId);
+        setSwActivityId(stored.activityId);
+        setSwDescription(stored.description);
+        setSwBillable(stored.billable);
+      } else {
+        clearStopwatch();
+      }
+    }
+  }, []);
+
   // Sync stopwatch project with global selection (only when not running)
   useEffect(() => {
     if (globalProjectId) {
@@ -101,6 +151,18 @@ export function TimerView() {
       if (!meActivityId) setMeActivityId(first);
     }
   }, [activitiesQuery.data, swActivityId, meActivityId]);
+
+  // Sync localStorage when stopwatch fields change while running
+  useEffect(() => {
+    if (!swStartedAt) return;
+    saveStopwatch({
+      startedAt: swStartedAt.toISOString(),
+      projectId: swProjectId,
+      activityId: swActivityId,
+      description: swDescription,
+      billable: swBillable,
+    });
+  }, [swStartedAt, swProjectId, swActivityId, swDescription, swBillable]);
 
   // Stopwatch tick
   useEffect(() => {
@@ -135,6 +197,7 @@ export function TimerView() {
         utils.timeEntry.list.invalidate(),
         utils.report.summary.invalidate(),
       ]);
+      clearStopwatch();
       setSwStartedAt(null);
       setSwDescription("");
     },
@@ -158,8 +221,16 @@ export function TimerView() {
       setErrorMsg("Select a project and activity first");
       return;
     }
-    setSwStartedAt(new Date());
+    const now = new Date();
+    setSwStartedAt(now);
     setErrorMsg(null);
+    saveStopwatch({
+      startedAt: now.toISOString(),
+      projectId: swProjectId,
+      activityId: swActivityId,
+      description: swDescription,
+      billable: swBillable,
+    });
   };
 
   const stopStopwatch = () => {
@@ -185,6 +256,21 @@ export function TimerView() {
   };
 
   const isRunning = Boolean(swStartedAt);
+
+  // Keyboard shortcuts
+  useShortcut(
+    "start-stop",
+    useCallback(() => {
+      if (isRunning) {
+        stopStopwatch();
+      } else {
+        startStopwatch();
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isRunning, swProjectId, swActivityId]),
+  );
+
+  useShortcut("new-entry", useCallback(() => handleManualDialogOpen(true), []));
 
   // Find selected project name for locked display
   const lockedProjectName = useMemo(() => {

@@ -6,9 +6,9 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useState,
 } from "react";
 
+import { usePersistedState } from "~/hooks/use-persisted-state";
 import { api } from "~/trpc/react";
 
 /** Use this sentinel to represent "All companies" in the selector */
@@ -48,10 +48,12 @@ export function ProjectFilterProvider({
   const { data: clients } = api.clients.list.useQuery();
   const { data: projects } = api.project.list.useQuery();
 
-  const [selectedClientId, setSelectedClientIdRaw] = useState<string | null>(
+  const [selectedClientId, setSelectedClientIdRaw] = usePersistedState<string | null>(
+    "tt:selectedClientId",
     null,
   );
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
+  const [selectedProjectId, setSelectedProjectId] = usePersistedState<string | null>(
+    "tt:selectedProjectId",
     null,
   );
 

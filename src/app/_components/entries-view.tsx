@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   CalendarDays,
   Check,
+  Copy,
   Loader2,
   Pencil,
   Plus,
@@ -12,6 +13,7 @@ import {
 } from "lucide-react";
 
 import { api } from "~/trpc/react";
+import { useShortcut } from "~/hooks/use-keyboard-shortcuts";
 import { useProjectFilter } from "./client-filter-context";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
@@ -207,6 +209,32 @@ export function EntriesView() {
     });
     setCreateOpen(true);
   };
+
+  const duplicateEntry = (entry: (typeof filteredEntries)[number]) => {
+    const durationMs =
+      new Date(entry.endAt).getTime() - new Date(entry.startAt).getTime();
+    const endAt = new Date();
+    const startAt = new Date(endAt.getTime() - durationMs);
+
+    setCreateDraft({
+      projectId: entry.project.id,
+      activityTypeId: entry.activityTypeId,
+      startAt: toDatetimeLocalValue(startAt),
+      endAt: toDatetimeLocalValue(endAt),
+      description: entry.description,
+      isBillable: entry.isBillable,
+    });
+    setCreateOpen(true);
+  };
+
+  // Keyboard shortcut: new entry
+  useShortcut(
+    "new-entry",
+    useCallback(() => {
+      openCreateDialog();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [globalProjectId, clientProjects, activitiesQuery.data]),
+  );
 
   if (entriesQuery.isLoading) {
     return <EntriesViewSkeleton />;
@@ -490,6 +518,16 @@ export function EntriesView() {
                             size="icon"
                             variant="ghost"
                             className="size-7"
+                            title="Duplicate"
+                            onClick={() => duplicateEntry(entry)}
+                          >
+                            <Copy className="size-3" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="size-7"
+                            title="Edit"
                             onClick={() => {
                               setEditingId(entry.id);
                               setEditDraft({
@@ -511,6 +549,7 @@ export function EntriesView() {
                             size="icon"
                             variant="ghost"
                             className="size-7 text-destructive hover:text-destructive"
+                            title="Delete"
                             onClick={() =>
                               setDeleteDialog({
                                 id: entry.id,
